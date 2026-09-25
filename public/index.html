@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Book your stay | Chakoram Homestay</title>
+<meta name="description" content="Check room availability and book directly with Chakoram Homestay, Minnie Bay, Port Blair.">
+<link rel="icon" href="/assets/favicon.svg"><link rel="stylesheet" href="/styles.css">
+<script type="module" src="/guest.js"></script></head>
+<body>
+<div class="notice demo-notice" id="demo-banner" hidden>Preview mode · Sample availability and simulated payments. No real reservation or charge.</div>
+<header class="site-header"><a class="brand" href="https://chakoramhomestay.in"><span class="brand-mark">C</span><span>CHAKORAM<small>HOMESTAY · PORT BLAIR</small></span></a><a class="quiet-link" href="https://chakoramhomestay.in">Back to our website <span aria-hidden="true">↗</span></a></header>
+<main class="guest-main">
+  <section class="intro"><div><p class="eyebrow">MINNIE BAY · ANDAMAN</p><h1>Find your room.</h1><p>Peaceful surroundings. A warm welcome.</p></div><div class="stay-inclusions"><span>Breakfast included</span><span>Airport &amp; Haddo Jetty transfers</span><span>Air-conditioned rooms</span></div></section>
+  <form id="search-form" class="search-bar">
+    <label>Check-in<input type="date" name="check_in" id="check-in" required></label>
+    <label>Check-out<input type="date" name="check_out" id="check-out" required></label>
+    <label>Rooms<select name="quantity" id="quantity"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+    <label>Guests<select name="guests" id="guests"></select></label>
+    <button class="button" type="submit">Check availability <span aria-hidden="true">→</span></button>
+  </form>
+  <p class="field-help">Count all guests, including children. For extra beds or special arrangements, <a href="https://wa.me/917679877907">contact us</a>.</p>
+  <div id="service-message" class="notice" role="status" hidden></div>
+  <div id="resume-banner" class="notice" hidden><span>You have a recent booking in progress.</span><button class="text-button" id="resume-booking">Check booking status</button></div>
+  <section aria-labelledby="results-title"><div class="section-line"><h2 id="results-title">Your stay at Chakoram</h2><p id="stay-label" aria-live="polite">Choose your travel dates</p></div>
+  <div id="results" class="room-grid" aria-live="polite"><p class="loading">Checking availability…</p></div></section>
+  <section class="help-strip"><div><h3>A little help planning your stay?</h3><p>We’re happy to help with rooms, transfers and arrival details.</p></div><a class="button secondary" href="https://wa.me/917679877907">WhatsApp Chakoram <span aria-hidden="true">↗</span></a></section>
+  <details class="policy-details"><summary>Booking &amp; cancellation information</summary><p id="public-policy">Contact Chakoram for booking terms.</p><p>All displayed room prices include applicable taxes. Any remaining balance is payable at the property. Special requests are subject to confirmation.</p><p>Your name, contact details and travel dates are used to manage your reservation. Card and UPI details are handled by the payment provider. Contact <a href="mailto:chakoram.peace@gmail.com">chakoram.peace@gmail.com</a> for privacy enquiries.</p></details>
+</main>
+<footer><span>Chakoram Homestay · Minnie Bay, Port Blair</span><a href="tel:+917679877907">+91 76798 77907</a><a href="/admin">Owner sign-in</a></footer>
+
+<dialog id="booking-dialog" class="booking-dialog"><div class="dialog-top"><span class="eyebrow">YOUR DIRECT BOOKING</span><button class="icon-button" id="close-booking" aria-label="Close booking form">×</button></div>
+<h2 id="booking-title">Complete your stay</h2><div id="booking-summary" class="booking-summary"></div>
+<form id="guest-form" class="guest-form">
+ <label class="full">Full name<input name="guest_name" autocomplete="name" maxlength="100" required minlength="2"></label>
+ <label>Email<input name="email" type="email" autocomplete="email" maxlength="180" required></label>
+ <label>Phone with country code<input name="phone" type="tel" autocomplete="tel" maxlength="22" placeholder="+91" required pattern="\+?[0-9 ()\-]{7,22}"></label>
+ <label class="full">Special requests <span class="optional">(optional)</span><textarea name="guest_note" maxlength="500" rows="2" placeholder="Arrival time, transfer details…"></textarea></label>
+ <details class="full policy-details" open><summary>Cancellation policy</summary><p id="checkout-policy"></p></details>
+ <label class="checkbox-line full"><input type="checkbox" name="accept_terms" required><span>I accept the booking and cancellation terms and the use of my details to manage this reservation.</span></label>
+ <div id="checkout-message" class="notice full" role="status" hidden></div>
+ <button type="submit" class="button full" id="pay-button">Continue to payment</button>
+ <p class="full small muted">Your room is held for 15 minutes during payment. Confirmation follows verification of payment.</p>
+</form>
+<div id="confirmation" hidden></div>
+</dialog>
+<noscript><div class="notice">Please enable JavaScript to check availability, or call +91 76798 77907.</div></noscript>
+</body></html>

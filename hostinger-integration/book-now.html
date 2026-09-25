@@ -1,0 +1,16 @@
+<!-- Replace the existing Book Now link/button with this link after the engine is live.
+     Keep your existing CSS class if you want the same styling. -->
+<a href="https://book.chakoramhomestay.in/" class="book-now">Book now</a>
+
+<!-- Optional compact date search. Dates pass to the booking engine in the same tab.
+     No gateway credentials, database credentials or guest data belong in this file. -->
+<form action="https://book.chakoramhomestay.in/" method="get"
+  style="display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:20px;background:#173f35;color:white;border-radius:10px;">
+  <label style="display:grid;gap:7px;font:14px system-ui;">Check-in
+    <input type="date" name="checkin" required style="font:16px system-ui;padding:10px;border:0;border-radius:5px;">
+  </label>
+  <label style="display:grid;gap:7px;font:14px system-ui;">Check-out
+    <input type="date" name="checkout" required style="font:16px system-ui;padding:10px;border:0;border-radius:5px;">
+  </label>
+  <button type="submit" style="font:600 14px system-ui;padding:13px 18px;border:0;border-radius:5px;background:#edc98c;color:#173f35;cursor:pointer;">Check availability</button>
+</form>
