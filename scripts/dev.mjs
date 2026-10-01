@@ -3,12 +3,13 @@ import {readFile,mkdir} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {resolve,extname} from 'node:path';
 import {createApp} from '../server/core.mjs';
+import {createPushService} from '../server/push.mjs';
 import {createLocalDatabase,seedDemo,demoGateway} from './dev-support.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
-const {db,rpc}=await createLocalDatabase(process.env.CHAKORAM_PREVIEW_DB||resolve(root,'.local-db'));
+const {db,rpc,pushRpc}=await createLocalDatabase(process.env.CHAKORAM_PREVIEW_DB||resolve(root,'.local-db'));
 await seedDemo(db);
-const app=createApp({}, {demo:true,rpc,gateway:demoGateway(db)});
-const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.webp':'image/webp'};
+const app=createApp({}, {demo:true,rpc,gateway:demoGateway(db),push:createPushService({},pushRpc,{demo:true})});
+const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.webmanifest':'application/manifest+json'};
 const port=Number(process.env.PORT||8787);
 http.createServer(async(req,res)=>{try{
  const url=new URL(req.url,`http://127.0.0.1:${port}`);

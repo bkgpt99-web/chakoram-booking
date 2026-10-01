@@ -12,6 +12,7 @@ A small, working booking application for Chakoram’s six rooms: five Deluxe and
 - Razorpay orders, checkout signature verification, captured-payment webhooks, refund updates and manual reconciliation.
 - Mobile owner desk: individual or bulk open/closed nights, external-booking notes, reservations, phone bookings, rates, policies, CSV export, cancellation and “CM updated” controls.
 - Server-verified owner account; HttpOnly sessions; restricted database permissions; origin validation; persistent request limits.
+- Owner phone push alerts, persistent Yanolja tasks, configurable reminders, device management and a test button. Activate with [docs/PUSH_SETUP.md](docs/PUSH_SETUP.md).
 - Printable on-screen confirmation. The current version does not send automatic guest or owner email/SMS/WhatsApp messages. The desk has a manual WhatsApp shortcut and a CM-update queue.
 
 ## 1. Preview locally
@@ -28,7 +29,7 @@ Open `http://127.0.0.1:8787` for the guest view and `/admin` for the sample owne
 ## 2. Create the production database and owner account
 
 1. Create a Supabase project under your own account, preferably in an Indian region if available.
-2. Open its SQL Editor, paste **database/setup.sql**, and run it once. This creates the rooms, protected tables and transactional functions. All dates start CLOSED and online sales start PAUSED.
+2. Open its SQL Editor, paste **database/setup.sql**, and run it once. This creates the rooms, protected tables and transactional functions. All dates start CLOSED and online sales start PAUSED. Then run **database/migrations/002_owner_push.sql** to add owner alerts.
 3. Under Authentication, create the owner user with the email you want to use and a strong password. Confirm the email through the supported invitation/confirmation flow or the owner’s dashboard control. Turn off public user sign-ups if you do not need them. Only the exact `ADMIN_EMAIL` configured below can use this application’s admin API.
 4. Retrieve the project URL and the legacy JWT-format `anon` and `service_role` API keys from the API settings. Use these legacy keys for this implementation, not the database password. They are entered only in Netlify’s private environment settings. They are not inserted into website HTML.
 5. Configure Supabase backups and data retention appropriate to your operations. CSV export is a report of up to 500 bookings, not a complete database backup.
@@ -117,6 +118,7 @@ The checkout opens as a normal page on your own subdomain. An iframe is delibera
 3. A website booking automatically reserves its physical rooms across all stay nights. Update Yanolja manually and mark **CM updated** on the reservation.
 4. For a phone booking, use **Add phone booking** to reserve currently open rooms. Check the shown price before confirming. Dates already blocked in the calendar must first be made available if you want to record them as a named reservation.
 5. After cancellations, update the channel manager again. Check the payment-review queue and gateway settlements regularly.
+6. Enable owner phone alerts following [the setup guide](docs/PUSH_SETUP.md). Complete pending Yanolja tasks only after making the external update; closing a notification does not clear a task.
 
 **Manual synchronisation cannot prevent a simultaneous OTA and website sale.** For instant booking without a channel-manager API, allocate specific rooms/dates exclusively to the website and remove them from the OTA allocation. The application prevents conflicts within its own database; it has no automatic Yanolja connection and cannot check external inventory. The “CM updated” flag is your acknowledgement, not a remote API update.
 
@@ -128,7 +130,7 @@ There is no booking-engine subscription built into this source code. Netlify, Su
 
 Run `npm run build` and `npm test`. Tests execute the actual PostgreSQL schema in PGlite and cover inventory, price validation, retries, late payments, refund replay, database permissions, authentication boundaries, origins and webhook signatures. They do not replace live merchant acceptance testing. Browser checks use the local sample server. The current source has not been tested with your private Netlify/Supabase/Razorpay accounts or modified your existing Hostinger website.
 
-The scope is direct booking for one property. It does not replace a full PMS, accounting package, OTA channel manager, housekeeping system or tax invoicing system. There is no public guest account or automatic messaging. Guest recovery after losing their browser session uses the property’s contact channel; the owner can find the reservation by name or reference.
+The scope is direct booking for one property. It does not replace a full PMS, accounting package, OTA channel manager, housekeeping system or tax invoicing system. There is no public guest account or automatic guest messaging. Owner Web Push alerts are available after the one-time setup. Guest recovery after losing their browser session uses the property’s contact channel; the owner can find the reservation by name or reference.
 
 ## Primary documentation
 

@@ -71,6 +71,14 @@ export function createProductionServices(env) {
     const data=await r.json().catch(()=>({}));
     if(!r.ok) throw new AppError('Sign-in failed. Check your details or sign in again.',401,'AUTH_FAILED'); return data;
   };
+  const pushRpc=async(action,input={})=>{
+    const r=await supabase('/rest/v1/rpc/ch_push',{method:'POST',headers:{'Content-Type':'application/json',
+      apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:`Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`},
+      body:JSON.stringify({p_action:action,p_input:input})});
+    const data=await r.json();
+    if(!r.ok) throw Object.assign(new Error('Push database request failed'),{pushDatabase:data});
+    return data;
+  };
   const gateway=async(path,body)=>{
     if(!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET) throw new AppError('Online payment is not available yet.',503,'NOT_CONFIGURED');
     const r=await fetch(`https://api.razorpay.com/v1/${path}`,{method:body?'POST':'GET',
@@ -80,7 +88,7 @@ export function createProductionServices(env) {
     if(!r.ok) throw new AppError('The payment service is temporarily unavailable. Please try again.',502,'PAYMENT_SERVICE');
     return data;
   };
-  return {rpc,auth,gateway};
+  return {rpc,auth,gateway,pushRpc};
 }
 
 export function createApp(env,services) {
@@ -207,6 +215,18 @@ export function createApp(env,services) {
           setCookie('ch_access','',0);setCookie('ch_refresh','',0);return respond({ok:true});
         }
         if(path==='/api/admin/dashboard'&&request.method==='GET') return respond(await rpc('admin_dashboard',{start:url.searchParams.get('start')}));
+        if(path==='/api/admin/booking'&&request.method==='GET') {
+          const id=url.searchParams.get('id');
+          if(!/^[0-9a-f-]{36}$/i.test(id||'')) throw new AppError('Invalid reservation.');
+          const b=await rpc('get_booking',{id}); delete b.token_hash; return respond(b);
+        }
+        if(path.startsWith('/api/admin/push/')) {
+          if(!services.push) throw new AppError('Phone alerts are not configured.',503,'PUSH_MIGRATION_REQUIRED');
+          if(request.method==='POST') await rateLimit(path.endsWith('/test')?'push-test':'push-settings',path.endsWith('/test')?5:60,300);
+          return respond(await services.push.handle(path.slice('/api/admin/push/'.length),request.method,body,user));
+        }
+        if(path==='/api/admin/sync'&&request.method==='POST'&&services.push)
+          return respond(await services.push.markSynced(body,user,()=>rpc('admin_sync',body)));
         const actions={'/api/admin/inventory':'admin_inventory','/api/admin/rates':'admin_rates','/api/admin/settings':'admin_settings',
           '/api/admin/cancel':'admin_cancel','/api/admin/sync':'admin_sync'};
         if(request.method==='POST'&&actions[path]) return respond(await rpc(actions[path],body));
