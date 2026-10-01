@@ -1,6 +1,7 @@
 import {PGlite} from '@electric-sql/pglite';
 import {readFile} from 'node:fs/promises';
 import {dbError} from '../server/core.mjs';
+import {pushDatabaseError} from '../server/push.mjs';
 export async function createLocalDatabase(path){
   const db=new PGlite(path);
   await db.exec(`do $$ begin
@@ -9,8 +10,10 @@ export async function createLocalDatabase(path){
     if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role; end if;
   end $$;`);
   await db.exec(await readFile(new URL('../database/setup.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../database/migrations/002_owner_push.sql',import.meta.url),'utf8'));
   const rpc=async(action,input={})=>{try{const r=await db.query('select ch_engine($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};
-  return {db,rpc};
+  const pushRpc=async(action,input={})=>{try{const r=await db.query('select ch_push($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw pushDatabaseError(e);}};
+  return {db,rpc,pushRpc};
 }
 export async function seedDemo(db){
   await db.exec(`update ch_settings set booking_open=true,policy_reviewed=true,

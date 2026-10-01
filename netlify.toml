@@ -32,3 +32,15 @@
   for = "/api/*"
   [headers.values]
     Cache-Control = "no-store"
+
+[[headers]]
+  for = "/owner-sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Service-Worker-Allowed = "/"
+
+[[headers]]
+  for = "/owner.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+    Cache-Control = "no-cache"
