@@ -1,7 +1,7 @@
 import {createApp,createProductionServices} from '../../server/core.mjs';
 import {createNetlifyPush,pushFailure} from '../../server/push.mjs';
 const services=createProductionServices(process.env);
-const notifyPaths=new Set(['/api/verify','/api/webhook','/api/admin/manual','/api/admin/cancel','/api/admin/reconcile','/api/admin/sync','/api/admin/push/subscribe']);
+const notifyPaths=new Set(['/api/verify','/api/webhook','/api/admin/manual','/api/admin/save-booking','/api/admin/cancel','/api/admin/reconcile','/api/admin/sync','/api/admin/push/subscribe']);
 export default async(request,context={})=>{
   const push=createNetlifyPush(process.env,services.pushRpc,context);
   const app=createApp(process.env,{...services,push});

@@ -35,7 +35,36 @@ export function publicBooking(b) {
     refunded_paise:b.refunded_paise,status:b.status==='held'&&new Date(b.expires_at)<new Date()?'expired':b.status,
     expires_at:b.expires_at,policy:b.policy,nightly_rates:b.nightly_rates};
 }
+// Owner entry has its own validation. Guest checkout still requires verified
+// contact fields, a current quote and acceptance of the cancellation policy.
+export function validateOwnerBooking(input) {
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const room_ids=input.room_ids;
+  if(!Array.isArray(room_ids)||!room_ids.length||room_ids.length>6||new Set(room_ids).size!==room_ids.length||room_ids.some(id=>typeof id!=='string'||!/^(D[1-5]|P1)$/.test(id))) throw new AppError('Select the rooms for this stay.');
+  const guests=input.guests==null||input.guests===''?null:input.guests;
+  validateStay({...input,quantity:room_ids.length,guests:guests??room_ids.length});
+  if(typeof input.guest_name!=='string'||!input.guest_name.trim()||input.guest_name.length>100) throw new AppError('Enter the guest name.');
+  const sources=['Direct','phone','walk-in','Booking.com','Agoda','Airbnb','Expedia','MMT/Goibibo','OTA','Other','website'];
+  if(!sources.includes(input.source)) throw new AppError('Choose a booking source.');
+  const email=input.email??'',phone=input.phone??'',guest_note=input.guest_note??'';
+  if(typeof email!=='string'||email.length>180||(email.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))) throw new AppError('Enter a valid email or leave it blank.');
+  if(typeof phone!=='string'||(phone.trim()&&!/^\+?[0-9 ()-]{7,22}$/.test(phone.trim()))) throw new AppError('Enter a valid phone number or leave it blank.');
+  if(typeof guest_note!=='string'||guest_note.length>500) throw new AppError('Keep the note within 500 characters.');
+  if(input.id) {
+    if(!uuid.test(input.id)||!Number.isInteger(input.revision)||input.revision<0) throw new AppError('Reopen the reservation and try again.');
+  } else if(!uuid.test(input.request_key||'')||input.source==='website') throw new AppError('Reopen the booking form and try again.');
+  return {id:input.id||null,revision:input.revision,request_key:input.request_key,room_ids:[...room_ids].sort(),
+    check_in:input.check_in,check_out:input.check_out,guests,guest_name:input.guest_name.trim(),
+    source:input.source,email:email.trim().toLowerCase(),phone:phone.trim(),guest_note:guest_note.trim()};
+}
 const DB_ERRORS={
+  OWNER_STALE:'This reservation changed in another window. Close this form and reopen the booking before editing.',
+  OWNER_BOOKING_LOCKED:'Only confirmed reservations can be edited. Review this reservation first.',
+  OWNER_SOURCE_LOCKED:'Keep the original source for a booking paid through the website.',
+  OWNER_INVALID_DATES:'Choose a stay of 1–30 nights, with arrival no more than one year ahead.',
+  OWNER_INVALID_GUEST:'Enter a guest name and check the optional guest details.',
+  OWNER_MIXED_ROOMS:'Select rooms of one type. Add a separate entry for the other room type.',
+  OWNER_REQUEST_REUSED:'This booking was already saved. Refresh Reservations before adding another entry.',
   NO_AVAILABILITY:'Those rooms have just become unavailable. Please search again.',
   QUOTE_CHANGED:'The tariff, advance or cancellation policy changed. Please search again and review the updated price.',
   HOLD_EXPIRED:'Your room hold has expired. Please search again.',
@@ -79,6 +108,18 @@ export function createProductionServices(env) {
     if(!r.ok) throw Object.assign(new Error('Push database request failed'),{pushDatabase:data});
     return data;
   };
+  const ownerRpc=async(input)=>{
+    const r=await supabase('/rest/v1/rpc/ch_owner_booking',{method:'POST',headers:{'Content-Type':'application/json',
+      apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:`Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`},
+      body:JSON.stringify({p_input:input})});
+    const data=await r.json();if(!r.ok)throw dbError(data.message||'');return data;
+  };
+  const ownerDashboard=async(month)=>{
+    const r=await supabase('/rest/v1/rpc/ch_owner_dashboard',{method:'POST',headers:{'Content-Type':'application/json',
+      apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:`Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`},
+      body:JSON.stringify({p_month:month})});
+    const data=await r.json();if(!r.ok)throw dbError(data.message||'');return data;
+  };
   const gateway=async(path,body)=>{
     if(!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET) throw new AppError('Online payment is not available yet.',503,'NOT_CONFIGURED');
     const r=await fetch(`https://api.razorpay.com/v1/${path}`,{method:body?'POST':'GET',
@@ -88,7 +129,7 @@ export function createProductionServices(env) {
     if(!r.ok) throw new AppError('The payment service is temporarily unavailable. Please try again.',502,'PAYMENT_SERVICE');
     return data;
   };
-  return {rpc,auth,gateway,pushRpc};
+  return {rpc,auth,gateway,pushRpc,ownerRpc,ownerDashboard};
 }
 
 export function createApp(env,services) {
@@ -214,7 +255,14 @@ export function createApp(env,services) {
           if(!demo&&cookies.ch_access) await auth('logout','POST',{},cookies.ch_access).catch(()=>{});
           setCookie('ch_access','',0);setCookie('ch_refresh','',0);return respond({ok:true});
         }
-        if(path==='/api/admin/dashboard'&&request.method==='GET') return respond(await rpc('admin_dashboard',{start:url.searchParams.get('start')}));
+        if(path==='/api/admin/dashboard'&&request.method==='GET') {
+          const month=url.searchParams.get('month');
+          if(month!==null){
+            if(!/^\d{4}-(0[1-9]|1[0-2])-01$/.test(month))throw new AppError('Choose a valid calendar month.');
+            return respond(await services.ownerDashboard(month));
+          }
+          return respond(await rpc('admin_dashboard',{start:url.searchParams.get('start')}));
+        }
         if(path==='/api/admin/booking'&&request.method==='GET') {
           const id=url.searchParams.get('id');
           if(!/^[0-9a-f-]{36}$/i.test(id||'')) throw new AppError('Invalid reservation.');
@@ -233,6 +281,12 @@ export function createApp(env,services) {
         if(path==='/api/admin/manual'&&request.method==='POST') {
           const input=validateGuest(body);const id=randomUUID();
           return respond({booking:publicBooking(await rpc('manual',{...input,id,reference:`CH-${id.replaceAll('-','').slice(0,12).toUpperCase()}`}))});
+        }
+        if(path==='/api/admin/save-booking'&&request.method==='POST') {
+          const input=validateOwnerBooking(body);
+          const booking=await services.ownerRpc({...input,actor:user.email});
+          delete booking.token_hash;delete booking.request_key;
+          return respond({booking});
         }
         if(path==='/api/admin/reconcile'&&request.method==='POST') {
           let b=await rpc('get_booking',{id:body.id});

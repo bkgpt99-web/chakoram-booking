@@ -11,9 +11,12 @@ export async function createLocalDatabase(path){
   end $$;`);
   await db.exec(await readFile(new URL('../database/setup.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../database/migrations/002_owner_push.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261116160951_owner_booking_details.sql',import.meta.url),'utf8'));
   const rpc=async(action,input={})=>{try{const r=await db.query('select ch_engine($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};
   const pushRpc=async(action,input={})=>{try{const r=await db.query('select ch_push($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw pushDatabaseError(e);}};
-  return {db,rpc,pushRpc};
+  const ownerRpc=async(input)=>{try{const r=await db.query('select ch_owner_booking($1::jsonb) as result',[JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};
+  const ownerDashboard=async(month)=>{const r=await db.query('select ch_owner_dashboard($1::date) as result',[month]);return r.rows[0].result;};
+  return {db,rpc,pushRpc,ownerRpc,ownerDashboard};
 }
 export async function seedDemo(db){
   await db.exec(`update ch_settings set booking_open=true,policy_reviewed=true,

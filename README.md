@@ -29,7 +29,7 @@ Open `http://127.0.0.1:8787` for the guest view and `/admin` for the sample owne
 ## 2. Create the production database and owner account
 
 1. Create a Supabase project under your own account, preferably in an Indian region if available.
-2. Open its SQL Editor, paste **database/setup.sql**, and run it once. This creates the rooms, protected tables and transactional functions. All dates start CLOSED and online sales start PAUSED. Then run **database/migrations/002_owner_push.sql** to add owner alerts.
+2. Open its SQL Editor, paste **database/setup.sql**, and run it once. This creates the rooms, protected tables and transactional functions. All dates start CLOSED and online sales start PAUSED. Then run **database/migrations/002_owner_push.sql** to add owner alerts. Finally run **supabase/migrations/20261116160951_owner_booking_details.sql** to enable name-only owner entry and booking edits.
 3. Under Authentication, create the owner user with the email you want to use and a strong password. Confirm the email through the supported invitation/confirmation flow or the owner’s dashboard control. Turn off public user sign-ups if you do not need them. Only the exact `ADMIN_EMAIL` configured below can use this application’s admin API.
 4. Retrieve the project URL and the legacy JWT-format `anon` and `service_role` API keys from the API settings. Use these legacy keys for this implementation, not the database password. They are entered only in Netlify’s private environment settings. They are not inserted into website HTML.
 5. Configure Supabase backups and data retention appropriate to your operations. CSV export is a report of up to 500 bookings, not a complete database backup.
@@ -143,3 +143,15 @@ The scope is direct booking for one property. It does not replace a full PMS, ac
 - Razorpay webhook verification: https://razorpay.com/docs/webhooks/validate-test/
 
 Prepared 25 September 2026. Third-party dashboards and plan terms can change; use the provider’s current documentation when setting up accounts.
+
+## Owner booking entry and editing
+
+Existing installations: apply `supabase/migrations/20261116160951_owner_booking_details.sql` to the existing booking database before deploying this application update. Do not rerun `database/setup.sql` as an upgrade.
+
+In Owner sign-in, choose **Add direct / OTA booking** on the calendar or Reservations tab. Select stay dates and physical rooms of one room type, choose Direct or an OTA, and enter the guest name. Email, phone, guest count and notes are optional. The calendar shows a complete month, with a month selector and previous/next month buttons. Swipe sideways to view all dates. The full guest name appears on every occupied night, excluding checkout. Tap the name, then **Edit booking details**, to update a confirmed stay.
+
+Owner entries can use nights already marked closed, so an OTA block can be recorded as a named reservation without first reopening it. Confirm the closed block belongs to this guest. Existing reservations and active payment holds cannot overlap. Moving or cancelling a reservation releases only its reservation allocation; manually closed nights stay closed.
+
+This does not charge a guest or record an OTA receipt. New owner entries display the website tariff for reference. Editing preserves existing prices, payment IDs, refund totals and agreed policy; handle additional charges/refunds separately. Yanolja updates remain manual. Changes to a reservation that was marked updated create a new CM task.
+
+The owner-only API validates the signed-in owner and same-origin requests. The new database function uses SECURITY INVOKER, permits only the service role, and shares the checkout inventory lock. An edit revision prevents an older browser window overwriting a newer booking. Retrying a new entry with the same request key does not duplicate it.

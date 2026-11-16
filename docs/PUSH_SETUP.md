@@ -25,7 +25,7 @@ New installations: run `database/setup.sql`, then this migration, then follow th
 | Late or conflicting payment; full refund needing review | Review reservation/payment before altering availability |
 | Dates or rooms changed through the backend | Updated task preserving previous pending room/date allocations |
 
-The current reservation UI has no stay-edit form; this feature does not add one. The database triggers cover such changes if added later. Expired unpaid holds do not generate booking alerts. Previously unsynced current/future reservations also appear when the migration runs.
+The owner booking form now supports edits to confirmed stays. Its room/date changes use these existing triggers to record the previous allocation and require a fresh CM update. Expired unpaid holds do not generate booking alerts. Previously unsynced current/future reservations also appear when the migration runs.
 
 A notification opens the relevant reservation, requesting sign-in if needed. Check and update Yanolja manually, then tap **Yanolja updated** on the task or **Mark CM updated** in the reservation. This records the owner, time and booking revision. If a booking changes while you are reviewing it, the old completion action is rejected so the latest change cannot be silently cleared. Dismissing or tapping a notification never completes the task.
 
