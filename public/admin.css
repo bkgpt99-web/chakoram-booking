@@ -70,3 +70,13 @@ body.calendar-screen{height:100vh;height:100dvh;display:flex;flex-direction:colu
  .calendar-toolbar{grid-template-columns:minmax(140px,1fr) auto auto;gap:8px;margin-bottom:5px}.calendar-toolbar h1{font-size:21px}.calendar-actions{grid-column:auto}.calendar-actions select{width:100px}.calendar-actions .button{font-size:11px;padding:4px 6px}.month-controls input{width:128px}.month-weekdays{padding-bottom:3px}.calendar-footer{padding-top:3px}
  .month-grid{--day-padding:2px;--day-head:17px;--entry-height:14px;--day-gap:1px;--dot-height:3px;gap:2px}.day-number{font-size:11px}.is-today .day-number{height:17px;min-width:20px;padding:2px}.day-open{font-size:9px}.day-guest{font-size:10px}.room-dots{height:3px;flex-basis:3px}.room-dots i{height:3px}
 }
+
+/* Pick both room types without leaving the booking form. */
+.room-selection-actions{display:flex;align-items:center;gap:18px;margin:0 0 14px}
+.manual-room-groups{display:grid;gap:12px}
+.manual-room-group{border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px}
+.manual-room-group h3{font-size:14px;font-weight:650;margin:0 0 10px}
+#manual-rooms .room-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+#manual-rooms .room-checks label{padding:4px 0;font-size:13px;white-space:nowrap}
+#manual-room-summary{color:var(--forest);font-weight:600;margin:14px 0 0}
+@media(max-width:480px){#manual-rooms .room-checks{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.manual-room-group{padding:12px}.room-selection-actions{gap:14px}.room-selection-actions .text-button{font-size:12px}}

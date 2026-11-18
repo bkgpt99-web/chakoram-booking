@@ -12,6 +12,7 @@ export async function createLocalDatabase(path){
   await db.exec(await readFile(new URL('../database/setup.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../database/migrations/002_owner_push.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261116160951_owner_booking_details.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261118154333_owner_mixed_room_booking.sql',import.meta.url),'utf8'));
   const rpc=async(action,input={})=>{try{const r=await db.query('select ch_engine($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};
   const pushRpc=async(action,input={})=>{try{const r=await db.query('select ch_push($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw pushDatabaseError(e);}};
   const ownerRpc=async(input)=>{try{const r=await db.query('select ch_owner_booking($1::jsonb) as result',[JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};

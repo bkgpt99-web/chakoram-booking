@@ -43,7 +43,7 @@ export function notificationFor(task) {
     : task.kind === 'external' ? 'Check Yanolja first; this OTA booking may already be recorded there.'
     : task.kind === 'cancelled' ? 'Review availability in Yanolja, then mark updated.'
     : 'Update Yanolja, then mark updated in the owner desk.';
-  return {title, body:`${b.reference} · ${b.quantity} ${b.room_type} · ${b.check_in} to ${b.check_out}. ${detail}`,
+  return {title, body:`${b.reference} · ${b.quantity} ${b.room_type||'rooms (Deluxe + Premium)'} · ${b.check_in} to ${b.check_out}. ${detail}`,
     tag:`chakoram-${b.id}`, booking_id:b.id, revision:task.revision};
 }
 

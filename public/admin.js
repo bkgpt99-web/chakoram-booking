@@ -1,5 +1,5 @@
 import {$,esc,money,today,plusDays,dateLabel,api,message,busy} from './common.js';
-import {createOwnerAlerts} from './owner-alerts.js';
+import {createOwnerAlerts} from './owner-alerts.js?v=mixed-rooms-20261118';
 let data,session,detailId,manualDraft,dayDate;
 let refreshVersion=0;
 const alerts=createOwnerAlerts({openBooking:openDetail,onChange:refresh,onError:handleError,onCount:n=>{$('stat-sync').textContent=n;$('alerts-count').textContent=n;$('alerts-count').hidden=!n;}});
@@ -146,19 +146,25 @@ $('rates-form').onsubmit=e=>{e.preventDefault();const v=formValues('rates-form')
 $('reset-rates').onclick=()=>{const v=formValues('rates-form');if(!v.start||!v.end)return;mutation('rates-form','/admin/rates',{...v,reset:true},$('reset-rates'));};
 $('settings-form').onsubmit=e=>{e.preventDefault();const v=formValues('settings-form');mutation('settings-form','/admin/settings',{booking_open:v.booking_open==='true',deposit_percent:+v.deposit_percent,cancellation_policy:v.cancellation_policy,policy_reviewed:v.policy_reviewed==='on',room_types:data.room_types.map(r=>({id:r.id,rate_paise:Math.round(Number(v[`rate_${r.id}`])*100),max_guests:Number(v[`guests_${r.id}`])}))});};
 $('booking-list').onclick=e=>{const button=e.target.closest('[data-detail]');if(button)openDetail(button.dataset.detail);};$('booking-search').oninput=renderBookings;$('booking-filter').onchange=renderBookings;$('close-detail').onclick=()=>$('detail-dialog').close();$('keep-booking').onclick=()=>$('cancel-dialog').close();$('confirm-cancel').onclick=async()=>{await busy($('confirm-cancel'),async()=>{await detailAction('/admin/cancel',{id:detailId});$('cancel-dialog').close();});};
-$('export-bookings').onclick=()=>{const cols=['reference','guest_name','email','phone','check_in','check_out','room_type','room_ids','source','guests','status','total_paise','paid_paise','refunded_paise','synced_to_cm'];const csvCell=v=>`"${String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')}"`;const csv=[cols,...data.bookings.map(b=>cols.map(k=>b[k]))].map(row=>row.map(csvCell).join(',')).join('\r\n');const link=document.createElement('a');link.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));link.download=`Chakoram-reservations-${today()}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),2000);};
+$('export-bookings').onclick=()=>{const cols=['reference','guest_name','email','phone','check_in','check_out','room_type','room_ids','source','guests','status','total_paise','paid_paise','refunded_paise','synced_to_cm'];const csvCell=v=>`"${String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')}"`;const csv=[cols,...data.bookings.map(b=>cols.map(k=>k==='room_type'?(b.room_type||'deluxe+premium'):b[k]))].map(row=>row.map(csvCell).join(',')).join('\r\n');const link=document.createElement('a');link.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));link.download=`Chakoram-reservations-${today()}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),2000);};
 function shiftMonth(month,offset){const d=new Date(`${month}-01T12:00:00Z`);d.setUTCMonth(d.getUTCMonth()+offset);return d.toISOString().slice(0,7);}
 function selectedManualRooms(){return [...$('manual-rooms').querySelectorAll('input:checked')].map(c=>c.value);}
 function renderManualRooms(selected,chooseFirst=false){
- const f=$('manual-form'),type=f.elements.room_type.value;
- const rooms=data.rooms.filter(r=>r.room_type===type);
  const ids=new Set(selected||[]);
- if(chooseFirst&&!ids.size&&rooms.length)ids.add(rooms[0].id);
- $('manual-rooms').innerHTML=rooms.map(r=>`<label><input type="checkbox" name="room_id" value="${esc(r.id)}" ${ids.has(r.id)?'checked':''}>${esc(r.name)}</label>`).join('');
+ if(chooseFirst&&!ids.size&&data.rooms.length)ids.add(data.rooms[0].id);
+ $('manual-rooms').innerHTML=data.room_types.map(type=>{
+  const rooms=data.rooms.filter(r=>r.room_type===type.id);
+  return `<div class="manual-room-group"><h3>${esc(type.name)}</h3><div class="room-checks">${rooms.map(r=>`<label><input type="checkbox" name="room_id" value="${esc(r.id)}" ${ids.has(r.id)?'checked':''}>${esc(r.name)}</label>`).join('')}</div></div>`;
+ }).join('');
+ $('select-all-manual').textContent=`Select all ${data.rooms.length} rooms`;
  manualAvailabilityHint();
 }
 function manualAvailabilityHint(){
  const f=$('manual-form'),ids=selectedManualRooms(),a=f.elements.check_in.value,z=f.elements.check_out.value;
+ const chosen=data.rooms.filter(r=>ids.includes(r.id));
+ const counts=data.room_types.map(t=>({type:t,count:chosen.filter(r=>r.room_type===t.id).length})).filter(t=>t.count);
+ const capacity=counts.reduce((sum,t)=>sum+t.count*t.type.max_guests,0);
+ $('manual-room-summary').textContent=ids.length?`${ids.length} ${ids.length===1?'room':'rooms'} selected · ${counts.map(t=>`${t.count} ${t.type.name.replace(/ Rooms?$/,'')}`).join(' + ')} · Up to ${capacity} guests`:'Select at least one room.';
  const conflicts=data.bookings.filter(b=>b.id!==manualDraft?.id&&ids.some(id=>b.room_ids.includes(id))&&b.check_in<z&&b.check_out>a&&['confirmed','held'].includes(status(b)));
  $('manual-availability').textContent=conflicts.length?'A selected room already has a booking or payment hold during this stay. Choose another room or dates.':'The selected rooms will be reserved from check-in up to, but not including, check-out. Availability is checked when saved. You may record an OTA stay on dates already marked closed.';
 }
@@ -169,7 +175,6 @@ function openManual(booking=null,options={}){
  $('save-manual').textContent=booking?'Save changes':'Save booking';
  f.elements.check_in.value=booking?.check_in||options.date||($('calendar-start').value===today().slice(0,7)?today():`${$('calendar-start').value}-01`);
  f.elements.check_out.value=booking?.check_out||plusDays(f.elements.check_in.value,1);
- f.elements.room_type.value=booking?.room_type||data.rooms.find(r=>r.id===options.roomId)?.room_type||'deluxe';
  for(const key of ['guest_name','email','phone','guest_note','guests'])f.elements[key].value=booking?.[key]??'';
  f.elements.source.value=booking?.source||'Direct';
  if(!f.elements.source.value)f.elements.source.value='Other';
@@ -179,7 +184,8 @@ function openManual(booking=null,options={}){
 }
 $('open-manual').onclick=()=>openManual();$('add-calendar-booking').onclick=()=>openManual();
 $('close-manual').onclick=()=>$('manual-dialog').close();
-$('manual-form').elements.room_type.onchange=()=>renderManualRooms([],true);
+$('select-all-manual').onclick=()=>renderManualRooms(data.rooms.map(r=>r.id));
+$('clear-manual-rooms').onclick=()=>renderManualRooms([]);
 $('manual-form').oninput=manualAvailabilityHint;
 $('manual-form').onsubmit=async e=>{
  e.preventDefault();

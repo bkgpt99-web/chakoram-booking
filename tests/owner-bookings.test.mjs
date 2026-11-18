@@ -2,8 +2,10 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createLocalDatabase} from '../scripts/dev-support.mjs';
-import {createApp,validateOwnerBooking,validateGuest} from '../server/core.mjs';
+import {createApp,validateOwnerBooking,validateGuest,publicBooking} from '../server/core.mjs';
+import {notificationFor} from '../server/push.mjs';
 let db,rpc,ownerRpc,ownerDashboard,day;
+const allRooms=['D1','D2','D3','D4','D5','P1'];
 const date=n=>{const d=new Date(`${day}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
 const input=(n,extra={})=>({request_key:randomUUID(),guest_name:'Sample Guest',source:'Direct',room_ids:['D1'],check_in:date(n),check_out:date(n+2),...extra});
 const edit=(b,extra={})=>({id:b.id,revision:b.owner_revision,guest_name:b.guest_name,source:b.source,room_ids:b.room_ids,check_in:b.check_in,check_out:b.check_out,guests:b.guests,email:b.email,phone:b.phone,guest_note:b.guest_note,...extra});
@@ -50,7 +52,7 @@ test('overlapping creates and moves fail without changing the original reservati
 test('active payment holds block owner entry; expired holds do not',async()=>{
  await rpc('admin_inventory',{room_ids:['P1'],start:date(20),end:date(21),is_open:true});
  await db.query("insert into ch_bookings(id,reference,request_key,token_hash,room_type,room_ids,check_in,check_out,guests,guest_name,email,phone,total_paise,deposit_paise,nightly_rates,policy,status,source,expires_at) values($1,$2,$1,'test','premium',array['P1'],$3,$4,1,'Payment guest','guest@example.com','12345678',760000,760000,'[]','Test policy','held','website',now()+interval '10 minutes')",[randomUUID(),'TEST-HOLD',date(20),date(22)]);
- await assert.rejects(()=>ownerRpc(input(20,{room_ids:['P1']})),{code:'RESERVATION_CONFLICT'});
+ await assert.rejects(()=>ownerRpc(input(20,{room_ids:['D1','P1']})),{code:'RESERVATION_CONFLICT'});
  await db.exec("update ch_bookings set expires_at=now()-interval '1 minute' where reference='TEST-HOLD'");
  assert.equal((await ownerRpc(input(20,{room_ids:['P1']}))).status,'confirmed');
 });
@@ -58,7 +60,6 @@ test('active payment holds block owner entry; expired holds do not',async()=>{
 test('premium capacity, room identity, optional fields and past stays are handled',async()=>{
  const b=await ownerRpc(input(25,{room_ids:['P1'],guests:4}));assert.equal(b.guests,4);
  await assert.rejects(()=>ownerRpc(input(28,{room_ids:['P1'],guests:5})),{code:'INVALID_ROOM_OR_GUESTS'});
- await assert.rejects(()=>ownerRpc(input(28,{room_ids:['D1','P1']})),{code:'OWNER_MIXED_ROOMS'});
  await assert.rejects(()=>ownerRpc(input(28,{room_ids:['D1','D1']})),{code:'INVALID_ROOMS'});
  await assert.rejects(()=>ownerRpc(input(28,{guest_name:'   '})),{code:'OWNER_INVALID_GUEST'});
  assert.equal((await ownerRpc(input(-2))).check_in,date(-2));
@@ -77,7 +78,7 @@ test('cancelled stays cannot be edited; manually closed inventory remains closed
 test('paid website booking edits preserve payment, agreed price and policy',async()=>{
  let b=await ownerRpc(input(40));
  await db.query("update ch_bookings set source='website',owner_entry=false,order_id='order_paid',payment_id='pay_paid',paid_paise=total_paise where id=$1",[b.id]);
- b=await rpc('get_booking',{id:b.id});const updated=await ownerRpc(edit(b,{guest_name:'Corrected Name',room_ids:['D3']}));
+ b=await rpc('get_booking',{id:b.id});const updated=await ownerRpc(edit(b,{guest_name:'Corrected Name',room_ids:['D3','P1']}));
  for(const key of ['order_id','payment_id','paid_paise','total_paise','deposit_paise','refunded_paise','policy'])assert.deepEqual(updated[key],b[key]);
  await assert.rejects(()=>ownerRpc(edit(updated,{source:'Direct'})),{code:'OWNER_SOURCE_LOCKED'});
 });
@@ -101,7 +102,7 @@ test('owner API requires owner auth and same origin; private fields are never re
 
 test('service role can save through invoker grants and RLS remains enabled',async()=>{
  await db.exec('alter role service_role bypassrls; set role service_role');
- const b=await ownerRpc(input(55));assert.equal(b.status,'confirmed');
+ const b=await ownerRpc(input(55,{room_ids:['D1','P1']}));assert.equal(b.status,'confirmed');
  await db.exec('reset role');
  const tables=(await db.query("select relrowsecurity from pg_class where oid='ch_bookings'::regclass")).rows;
  assert.equal(tables[0].relrowsecurity,true);
@@ -116,4 +117,65 @@ test('month calendar includes every day in short, long and leap-year months',asy
  await db.exec('set role authenticated');
  await assert.rejects(()=>ownerDashboard('2026-11-01'));
  await db.exec('reset role');
+});
+
+
+test('one name-only entry reserves all six rooms at their own seasonal and base rates',async()=>{
+ await rpc('admin_rates',{room_type:'deluxe',start:date(70),end:date(70),rate_paise:400000});
+ await rpc('admin_rates',{room_type:'premium',start:date(70),end:date(70),rate_paise:500000});
+ const request=input(70,{room_ids:allRooms,source:'Booking.com'});
+ const b=await ownerRpc(request);
+ assert.deepEqual(b.room_ids,allRooms);assert.equal(b.room_type,null);assert.equal(b.guests,null);
+ assert.equal(b.total_paise,4480000);assert.equal(b.deposit_paise,4480000);assert.equal(b.paid_paise,0);
+ assert.equal(b.nightly_rates.length,2);assert.equal(b.nightly_rates[0].total_paise,2500000);
+ assert.equal(b.nightly_rates[1].total_paise,1980000);
+ assert.equal(b.nightly_rates[0].rooms.find(r=>r.room_id==='P1').rate_paise,500000);
+ assert.equal(b.nightly_rates[1].rooms.find(r=>r.room_id==='D1').rate_paise,320000);
+ assert.equal((await ownerRpc({...request,room_ids:[...allRooms].reverse()})).id,b.id);
+ const count=(await db.query('select count(*)::int as n from ch_bookings where request_key=$1',[request.request_key])).rows[0].n;
+ assert.equal(count,1);
+ const dashboard=await ownerDashboard(date(70));
+ for(const room of allRooms)assert.equal(dashboard.calendar.find(c=>c.room_id===room&&c.date===date(70)).booking.id,b.id);
+ const task=(await db.query('select * from ch_push_tasks where booking_id=$1',[b.id])).rows[0];
+ assert.equal(task.booking_id,b.id);assert.equal(publicBooking(b).room_type,'mixed');
+ const notice=notificationFor({...task,booking:{...b,quantity:6}});
+ assert.match(notice.body,/6 rooms \(Deluxe \+ Premium\)/);assert.ok(!notice.body.includes('null'));
+});
+
+test('mixed guest capacity adds five Deluxe and one Premium limits',async()=>{
+ assert.equal((await ownerRpc(input(76,{room_ids:allRooms,guests:19}))).guests,19);
+ await assert.rejects(()=>ownerRpc(input(79,{room_ids:allRooms,guests:20})),{code:'INVALID_ROOM_OR_GUESTS'});
+ await assert.rejects(()=>ownerRpc(input(79,{room_ids:['D1','P1'],guests:8})),{code:'INVALID_ROOM_OR_GUESTS'});
+ assert.equal((await ownerRpc(input(79,{room_ids:['D1','P1'],guests:7}))).guests,7);
+});
+
+test('one occupied Premium room rejects the entire combined entry without a partial reservation',async()=>{
+ await ownerRpc(input(83,{room_ids:['P1']}));
+ const request=input(83,{room_ids:allRooms});
+ await assert.rejects(()=>ownerRpc(request),{code:'RESERVATION_CONFLICT'});
+ assert.equal((await db.query('select count(*)::int as n from ch_bookings where request_key=$1',[request.request_key])).rows[0].n,0);
+ assert.deepEqual((await ownerRpc(input(83,{room_ids:['D1']}))).room_ids,['D1']);
+});
+
+test('combined booking edits preserve one identity, payments and release removed rooms',async()=>{
+ let b=await ownerRpc(input(87,{room_ids:allRooms}));const original=b;
+ b=await ownerRpc(edit(b,{room_ids:['D3','P1'],check_in:date(90),check_out:date(92)}));
+ assert.equal(b.id,original.id);assert.equal(b.reference,original.reference);assert.equal(b.room_type,null);
+ for(const key of ['total_paise','deposit_paise','paid_paise','refunded_paise','policy','nightly_rates'])assert.deepEqual(b[key],original[key]);
+ const old=await ownerDashboard(date(87));
+ assert.equal(old.calendar.find(c=>c.room_id==='D3'&&c.date===date(87)).booking,null);
+ assert.equal(old.calendar.find(c=>c.room_id==='P1'&&c.date===date(90)).booking.id,b.id);
+ b=await ownerRpc(edit(b,{room_ids:['D3']}));assert.equal(b.room_type,'deluxe');
+ const changed=await ownerDashboard(date(90));assert.equal(changed.calendar.find(c=>c.room_id==='P1'&&c.date===date(90)).booking,null);
+ b=await ownerRpc(edit(b,{room_ids:['P1']}));assert.equal(b.room_type,'premium');
+});
+
+test('cancelling a combined booking releases both types and respects manually closed nights',async()=>{
+ await rpc('admin_inventory',{room_ids:['D1','P1'],start:date(100),end:date(101),is_open:true});
+ const b=await ownerRpc(input(100,{room_ids:allRooms}));
+ let av=await rpc('availability',{check_in:date(100),check_out:date(102),quantity:1,guests:1});
+ assert.equal(av.rooms.find(r=>r.id==='deluxe').available,0);assert.equal(av.rooms.find(r=>r.id==='premium').available,0);
+ await rpc('admin_cancel',{id:b.id});
+ av=await rpc('availability',{check_in:date(100),check_out:date(102),quantity:1,guests:1});
+ assert.equal(av.rooms.find(r=>r.id==='deluxe').available,1);assert.equal(av.rooms.find(r=>r.id==='premium').available,1);
 });

@@ -29,7 +29,7 @@ export function validateGuest(input) {
   return {...input,guest_name:input.guest_name.trim(),email:input.email.trim().toLowerCase(),token_hash:hash(input.token)};
 }
 export function publicBooking(b) {
-  return {id:b.id,reference:b.reference,room_type:b.room_type,quantity:b.room_ids.length,
+  return {id:b.id,reference:b.reference,room_type:b.room_type||'mixed',quantity:b.room_ids.length,
     check_in:b.check_in,check_out:b.check_out,guest_name:b.guest_name,guests:b.guests,
     total_paise:b.total_paise,deposit_paise:b.deposit_paise,paid_paise:b.paid_paise,
     refunded_paise:b.refunded_paise,status:b.status==='held'&&new Date(b.expires_at)<new Date()?'expired':b.status,
@@ -63,7 +63,7 @@ const DB_ERRORS={
   OWNER_SOURCE_LOCKED:'Keep the original source for a booking paid through the website.',
   OWNER_INVALID_DATES:'Choose a stay of 1–30 nights, with arrival no more than one year ahead.',
   OWNER_INVALID_GUEST:'Enter a guest name and check the optional guest details.',
-  OWNER_MIXED_ROOMS:'Select rooms of one type. Add a separate entry for the other room type.',
+  OWNER_MIXED_ROOMS:'Mixed-room booking is being prepared. Please update the booking database and try again.',
   OWNER_REQUEST_REUSED:'This booking was already saved. Refresh Reservations before adding another entry.',
   NO_AVAILABILITY:'Those rooms have just become unavailable. Please search again.',
   QUOTE_CHANGED:'The tariff, advance or cancellation policy changed. Please search again and review the updated price.',
