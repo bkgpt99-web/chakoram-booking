@@ -43,7 +43,8 @@ export function validateOwnerBooking(input) {
   if(!Array.isArray(room_ids)||!room_ids.length||room_ids.length>6||new Set(room_ids).size!==room_ids.length||room_ids.some(id=>typeof id!=='string'||!/^(D[1-5]|P1)$/.test(id))) throw new AppError('Select the rooms for this stay.');
   const guests=input.guests==null||input.guests===''?null:input.guests;
   validateStay({...input,quantity:room_ids.length,guests:guests??room_ids.length});
-  if(typeof input.guest_name!=='string'||!input.guest_name.trim()||input.guest_name.length>100) throw new AppError('Enter the guest name.');
+  const guest_name=typeof input.guest_name==='string'?input.guest_name.trim().toUpperCase():'';
+  if(!guest_name||guest_name.length>100) throw new AppError('Enter the guest name (up to 100 characters).');
   const sources=['Direct','phone','walk-in','Booking.com','Agoda','Airbnb','Expedia','MMT/Goibibo','OTA','Other','website'];
   if(!sources.includes(input.source)) throw new AppError('Choose a booking source.');
   const email=input.email??'',phone=input.phone??'',guest_note=input.guest_note??'';
@@ -54,7 +55,7 @@ export function validateOwnerBooking(input) {
     if(!uuid.test(input.id)||!Number.isInteger(input.revision)||input.revision<0) throw new AppError('Reopen the reservation and try again.');
   } else if(!uuid.test(input.request_key||'')||input.source==='website') throw new AppError('Reopen the booking form and try again.');
   return {id:input.id||null,revision:input.revision,request_key:input.request_key,room_ids:[...room_ids].sort(),
-    check_in:input.check_in,check_out:input.check_out,guests,guest_name:input.guest_name.trim(),
+    check_in:input.check_in,check_out:input.check_out,guests,guest_name,
     source:input.source,email:email.trim().toLowerCase(),phone:phone.trim(),guest_note:guest_note.trim()};
 }
 const DB_ERRORS={
