@@ -1,3 +1,4 @@
+import {financeFor,validatePaymentInput,MAX_PAISE} from './payments.mjs';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
 export class AppError extends Error {
@@ -31,7 +32,7 @@ export function validateGuest(input) {
 export function publicBooking(b) {
   return {id:b.id,reference:b.reference,room_type:b.room_type||'mixed',quantity:b.room_ids.length,
     check_in:b.check_in,check_out:b.check_out,guest_name:b.guest_name,guests:b.guests,
-    total_paise:b.total_paise,deposit_paise:b.deposit_paise,paid_paise:b.paid_paise,
+    total_paise:b.total_paise,deposit_paise:b.deposit_paise,paid_paise:b.paid_paise+(b.offline_received_paise||0),
     refunded_paise:b.refunded_paise,status:b.status==='held'&&new Date(b.expires_at)<new Date()?'expired':b.status,
     expires_at:b.expires_at,policy:b.policy,nightly_rates:b.nightly_rates};
 }
@@ -54,11 +55,26 @@ export function validateOwnerBooking(input) {
   if(input.id) {
     if(!uuid.test(input.id)||!Number.isInteger(input.revision)||input.revision<0) throw new AppError('Reopen the reservation and try again.');
   } else if(!uuid.test(input.request_key||'')||input.source==='website') throw new AppError('Reopen the booking form and try again.');
-  return {id:input.id||null,revision:input.revision,request_key:input.request_key,room_ids:[...room_ids].sort(),
+  const financial={};
+  if(!input.id){
+    const sale=input.sale_amount_paise??null,advance=input.advance_paise??0;
+    if((sale!==null&&(!Number.isSafeInteger(sale)||sale<0||sale>MAX_PAISE))||!Number.isSafeInteger(advance)||advance<0||advance>MAX_PAISE||(advance>0&&(sale===null||advance>sale))) throw new AppError('Enter a valid sale amount and an advance no greater than the sale.');
+    Object.assign(financial,{sale_amount_paise:sale,advance_paise:advance});
+  }
+  return {...financial,id:input.id||null,revision:input.revision,request_key:input.request_key,room_ids:[...room_ids].sort(),
     check_in:input.check_in,check_out:input.check_out,guests,guest_name,
     source:input.source,email:email.trim().toLowerCase(),phone:phone.trim(),guest_note:guest_note.trim()};
 }
 const DB_ERRORS={
+  WALL_STALE:'This reservation changed. Refresh and review the latest details before marking the booking wall updated.',
+  PAYMENT_STALE:'Payment details changed. Reopen this reservation before saving.',
+  PAYMENT_BOOKING_LOCKED:'Payments can only be recorded for a confirmed reservation.',
+  PAYMENT_WEBSITE_PRICE:'The agreed website price cannot be changed here.',
+  PAYMENT_INVALID_SALE:'Sale amount must cover the payments already received. Enter advance only after entering the sale amount.',
+  PAYMENT_INVALID_RECEIPT:'Enter the sale amount first, then a payment greater than zero and no higher than the balance.',
+  PAYMENT_REQUEST_REUSED:'This payment was already recorded. Reopen payment details before adding another payment.',
+  PAYMENT_CORRECTION_REASON:'Enter a reason for correcting this payment entry.',
+  PAYMENT_FILTER_DATES:'The end date must be on or after the start date.',
   OWNER_STALE:'This reservation changed in another window. Close this form and reopen the booking before editing.',
   OWNER_BOOKING_LOCKED:'Only confirmed reservations can be edited. Review this reservation first.',
   OWNER_SOURCE_LOCKED:'Keep the original source for a booking paid through the website.',
@@ -121,6 +137,13 @@ export function createProductionServices(env) {
       body:JSON.stringify({p_month:month})});
     const data=await r.json();if(!r.ok)throw dbError(data.message||'');return data;
   };
+  const paymentService=name=>async(action,input={})=>{
+    const r=await supabase(`/rest/v1/rpc/${name}`,{method:'POST',headers:{'Content-Type':'application/json',
+      apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:`Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`},
+      body:JSON.stringify({p_action:action,p_input:input})});
+    const data=await r.json();if(!r.ok)throw dbError(data.message||'');return data;
+  };
+  const financeRpc=paymentService('ch_payments'),paymentReminderRpc=paymentService('ch_payment_push'),wallRpc=paymentService('ch_wall');
   const gateway=async(path,body)=>{
     if(!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET) throw new AppError('Online payment is not available yet.',503,'NOT_CONFIGURED');
     const r=await fetch(`https://api.razorpay.com/v1/${path}`,{method:body?'POST':'GET',
@@ -130,7 +153,7 @@ export function createProductionServices(env) {
     if(!r.ok) throw new AppError('The payment service is temporarily unavailable. Please try again.',502,'PAYMENT_SERVICE');
     return data;
   };
-  return {rpc,auth,gateway,pushRpc,ownerRpc,ownerDashboard};
+  return {rpc,auth,gateway,pushRpc,ownerRpc,ownerDashboard,financeRpc,paymentReminderRpc,wallRpc};
 }
 
 export function createApp(env,services) {
@@ -267,7 +290,43 @@ export function createApp(env,services) {
         if(path==='/api/admin/booking'&&request.method==='GET') {
           const id=url.searchParams.get('id');
           if(!/^[0-9a-f-]{36}$/i.test(id||'')) throw new AppError('Invalid reservation.');
-          const b=await rpc('get_booking',{id}); delete b.token_hash; return respond(b);
+          const b=await rpc('get_booking',{id}); delete b.token_hash;delete b.request_key;return respond({...b,...financeFor(b),...(services.wallRpc?{wall:await services.wallRpc('booking',{booking_id:id})}:{})});
+        }
+        if(path.startsWith('/api/admin/wall/')) {
+          const action=path.slice('/api/admin/wall/'.length);
+          if(request.method==='GET'&&action==='status'){
+            const offset=url.searchParams.get('offset')||'0';if(!/^\d{1,6}$/.test(offset))throw new AppError('Choose a valid page.');
+            return respond(await services.wallRpc('status',{offset:Number(offset)}));
+          }
+          if(request.method==='POST'&&['ack','snooze','settings'].includes(action)){
+            await rateLimit('owner-wall',60,300);let input;
+            if(action==='settings'){
+              if(![0,15,30,60,120].includes(body.reminder_minutes))throw new AppError('Choose a reminder interval.');
+              input={reminder_minutes:body.reminder_minutes};
+            }else{
+              if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.booking_id||'')||!Number.isInteger(body.revision)||body.revision<1)throw new AppError('Reopen this reservation and try again.');
+              if(action==='ack'&&typeof body.updated!=='boolean')throw new AppError('Choose whether the wall is updated.');
+              input={booking_id:body.booking_id,revision:body.revision,...(action==='ack'?{updated:body.updated}:{})};
+            }
+            return respond(await services.wallRpc(action,{...input,owner_email:user.email}));
+          }
+          throw new AppError('Not found.',404);
+        }
+        if(path.startsWith('/api/admin/payments/')) {
+          const action=path.slice('/api/admin/payments/'.length);
+          if(request.method==='GET'&&['list','website_report','booking'].includes(action)){
+            const input=Object.fromEntries(url.searchParams);
+            if(action==='booking'&&!/^[0-9a-f-]{36}$/i.test(input.id||''))throw new AppError('Choose a reservation.');
+            for(const key of ['start','end'])if(input[key]&&(!/^\d{4}-\d{2}-\d{2}$/.test(input[key])||!Number.isFinite(Date.parse(input[key]))||new Date(input[key]).toISOString().slice(0,10)!==input[key]))throw new AppError('Choose valid report dates.');
+            for(const key of ['limit','offset'])if(input[key]!==undefined&&(!/^\d{1,8}$/.test(input[key])||Number(input[key])>1000000))throw new AppError('Choose a valid report page.');
+            if((input.search||'').length>100)throw new AppError('Keep your search within 100 characters.');
+            return respond(await services.financeRpc(action,{...input,actor:user.email}));
+          }
+          if(request.method==='POST'&&['save_sale','receipt','void','settings'].includes(action)){
+            await rateLimit('owner-payments',60,300);
+            return respond(await services.financeRpc(action,{...validatePaymentInput(action,body,AppError),actor:user.email}));
+          }
+          throw new AppError('Not found.',404);
         }
         if(path.startsWith('/api/admin/push/')) {
           if(!services.push) throw new AppError('Phone alerts are not configured.',503,'PUSH_MIGRATION_REQUIRED');

@@ -166,3 +166,49 @@ The owner form shows both room groups together. Any selection, including all six
 Mixed allocations display as Deluxe + Premium in guest confirmations and phone/CM alerts, and as deluxe+premium in CSV room_type. The full-month calendar remains unchanged. Guest website checkout still books one room type at a time.
 
 Owner booking defaults: guest names are automatically converted to CAPITAL LETTERS while entering or editing, and the owner API saves the uppercase name. Choosing a check-in date automatically sets checkout to the following day, including month and year changes. Use the checkout date picker to select a longer stay. Opening an existing booking retains its saved checkout date; changing check-in resets checkout to one night. The checkout picker allows the existing 1–30-night stay range. No additional database migration is needed for these defaults.
+
+
+## Owner payments, website report and tile wall reminders (November 2026)
+
+Apply `supabase/migrations/20261121073551_owner_payment_collections.sql`, then
+`supabase/migrations/20261122104009_owner_booking_wall.sql` after the earlier migrations.
+Deploy the matching frontend and Netlify functions together. No new environment variables
+or paid notification provider are required. The existing published-production-only
+`push-alerts` function checks all reminder queues every five minutes.
+
+Add booking accepts an optional agreed sale amount and advance already received.
+The balance is calculated in paise, and the initial advance is recorded atomically with
+the room allocation. For existing manual bookings, enter the actual sale amount in
+Payment details; the reference tariff is never assumed to be an unpaid sale.
+
+Payments lists confirmed unpaid or unpriced reservations across the full booking history,
+with arrival, departure, in-house, overdue and unpriced filters. Record later cash, UPI,
+bank or OTA receipts, or void a mistaken entry with a retained reason. Amounts and
+revisions are validated on the server; retries cannot create duplicate receipts.
+Razorpay capture/refund fields remain authoritative and unchanged by owner receipts.
+Website payments are counted automatically. Never enter the same gateway receipt twice.
+
+Payment reminders include guest name and current balance at 9am IST on the day before
+check-in and checkout (normally within the next five-minute scheduler run). Only
+confirmed reservations with a known positive balance qualify. Each event/device has
+a durable delivery receipt; paid, cancelled or rescheduled stays are rechecked before
+delivery. Phone notification permissions and an active subscribed device are required.
+
+Website bookings reports only reservations created by guests (`source=website` and
+`owner_entry=false`), with confirmed status selected initially, check-in date filters,
+search, pagination and a CSV export of all filtered rows in rupees. Other statuses are
+available explicitly. Summary balances include confirmed stays only.
+
+Alerts also contains an independent Booking wall list for physical tile-wall entries.
+New confirmed/review bookings, guest-name/room/date/source/guest-count changes and
+cancellations create or reopen a wall task. Existing current/upcoming confirmed and
+review bookings are queued once for an explicit wall check. Marking Yanolja updated
+does not mark the wall updated, and vice versa. Wall reminders default to hourly after
+an initial alert; choose 15/30/60/120 minutes or one alert only, or snooze an individual
+task for 15 minutes. A changed reservation invalidates old completion requests.
+Wall reminders stop on completion or after checkout, and use their own notification
+tag and deep link. Recording a payment does not reopen a wall task.
+
+All new tables have RLS enabled and are callable only through authenticated owner API
+routes using the server role. Guest browser access to these tables/RPCs is denied.
+Local preview uses sample records and never sends real push notifications or charges.

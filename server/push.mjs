@@ -1,3 +1,5 @@
+import {wallNotificationFor} from './wall.mjs';
+import {paymentNotificationFor} from './payments.mjs';
 import webpush from 'web-push';
 import { ECDH } from 'node:crypto';
 import { AppError } from './core.mjs';
@@ -140,6 +142,7 @@ export function createPushService(env, rpc, options = {}) {
       try {keys = await credentials();}
       catch(error) {if(error.code === 'PUSH_MIGRATION_REQUIRED') return {processed:0,setup_required:true}; throw error;}
       if (!keys.private_key) return {processed:0};
+      const cmDelivery=(async()=>{
       const tasks = await call('claim',{owner_email:owner()});
       await Promise.all(tasks.map(async task => {
         const claim = {booking_id:task.booking_id,revision:task.revision,lease_token:task.lease_token};
@@ -153,7 +156,43 @@ export function createPushService(env, rpc, options = {}) {
         }));
         await call('finish',{...claim,success:outcomes.every(Boolean)});
       }));
-      return {processed:tasks.length};
+      return tasks.length;
+      })();
+      const paymentDelivery=(async()=>{
+        const payment=options.paymentRpc;if(!payment)return 0;
+        const tasks=await payment('claim',{owner_email:owner()});
+        await Promise.all(tasks.map(async task=>{
+          const claim={id:task.id,lease_token:task.lease_token};
+          const outcomes=await Promise.all(task.subscriptions.map(async device=>{
+            const current=await payment('current',claim);
+            if(!current.current)return false;
+            try{
+              await sendDevice(device,paymentNotificationFor(current),keys);
+              await payment('delivered',{...claim,subscription_id:device.id});
+              return true;
+            }catch(error){return recordError(device,error);}
+          }));
+          await payment('finish',{...claim,success:outcomes.every(Boolean)});
+        }));
+        return tasks.length;
+      })();
+      const wallDelivery=(async()=>{
+        const wall=options.wallRpc;if(!wall)return 0;
+        const tasks=await wall('claim',{owner_email:owner()});
+        await Promise.all(tasks.map(async task=>{
+          const claim={booking_id:task.booking_id,revision:task.revision,lease_token:task.lease_token};
+          const outcomes=await Promise.all(task.subscriptions.map(async device=>{
+            const current=await wall('current',claim);if(!current.current)return false;
+            try{await sendDevice(device,wallNotificationFor(current),keys);await wall('delivered',{...claim,subscription_id:device.id});return true;}
+            catch(error){return recordError(device,error);}
+          }));
+          await wall('finish',{...claim,success:outcomes.every(Boolean)});
+        }));
+        return tasks.length;
+      })();
+      const [cm,payments,wall]=await Promise.allSettled([cmDelivery,paymentDelivery,wallDelivery]);
+      if(cm.status==='rejected')throw cm.reason;if(payments.status==='rejected')throw payments.reason;if(wall.status==='rejected')throw wall.reason;
+      return {processed:cm.value,...(options.paymentRpc?{payment_reminders:payments.value}:{}),...(options.wallRpc?{wall_reminders:wall.value}:{})};
     }
   };
 }
@@ -165,7 +204,7 @@ export function pushFailure(error) {
 
 // Runtime deploy metadata is authoritative; CONTEXT is not guaranteed to be a
 // function environment variable. Old deploy URLs and previews must not send.
-export function createNetlifyPush(env,rpc,context={}) {
+export function createNetlifyPush(env,rpc,context={},paymentRpc,wallRpc) {
   return createPushService({...env,CONTEXT:context.deploy?.context||'unknown'},rpc,
-    {demo:context.deploy?.published!==true});
+    {demo:context.deploy?.published!==true,paymentRpc,wallRpc});
 }

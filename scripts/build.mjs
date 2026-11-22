@@ -5,5 +5,5 @@ for(const dir of ['public','server','netlify/functions'])for(const name of await
  if(/\.(mjs|js)$/.test(name))execFileSync(process.execPath,['--check',resolve(dir,name)],{stdio:'inherit'});
 }
 for(const name of ['public/index.html','public/admin.html','database/setup.sql','database/migrations/002_owner_push.sql','supabase/migrations/20261116160951_owner_booking_details.sql','supabase/migrations/20261118154333_owner_mixed_room_booking.sql',
-  'public/owner.webmanifest','public/assets/owner-192.png','public/assets/owner-512.png','netlify.toml'])await access(name);
+  'public/owner.webmanifest','public/assets/owner-192.png','public/assets/owner-512.png','supabase/migrations/20261121073551_owner_payment_collections.sql','supabase/migrations/20261122104009_owner_booking_wall.sql','netlify.toml'])await access(name);
 console.log('Booking engine validated. Public assets: public/; server functions: netlify/functions/.');

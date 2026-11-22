@@ -30,12 +30,12 @@ export function createOwnerAlerts({openBooking,onChange,onError,onCount}) {
     const current=state.subscriptions.find(d=>d.id===readDevice());
     const enabled=!!current&&supportsPush()&&Notification.permission==='granted';
     const iphoneNeedsInstall=ios()&&!installed();
-    $('push-status').textContent=!state.delivery_enabled ? 'Phone delivery is off in this preview. Pending Yanolja tasks still work.'
+    $('push-status').textContent=!state.delivery_enabled ? 'Phone delivery is off in this preview. Pending wall and Yanolja tasks still work.'
       : iphoneNeedsInstall ? 'On iPhone or iPad, add this page to your Home Screen, then open it there to enable alerts.'
       : !supportsPush() ? 'This browser does not support phone alerts. Open the published owner desk in a supported browser.'
       : Notification.permission==='denied' ? 'Notifications are blocked. Allow them in this site’s browser settings, then enable alerts.'
       : enabled ? 'Alerts are enabled on this device. Send a test to check delivery.'
-      : 'Enable alerts on this device for new bookings and pending Yanolja updates.';
+      : 'Enable alerts on this device for bookings, payment reminders, and pending wall and Yanolja updates.';
     $('push-enable').hidden=enabled;
     $('push-enable').disabled=!state.delivery_enabled||!supportsPush()||iphoneNeedsInstall;
     $('push-test').disabled=!enabled||!state.delivery_enabled;
@@ -96,7 +96,7 @@ export function createOwnerAlerts({openBooking,onChange,onError,onCount}) {
   }
   document.addEventListener('visibilitychange',()=>{if(active&&!document.hidden)refresh();});
   return {refresh,closeNotifications,
-    async start(){active=true;await refresh();if(!timer)timer=setInterval(()=>{if(!document.hidden)refresh();},30000);},
+    async start(){active=true;if(supportsPush())await worker().catch(()=>{});await refresh();if(!timer)timer=setInterval(()=>{if(!document.hidden)refresh();},30000);},
     stop(){active=false;clearInterval(timer);timer=null;}
   };
 }

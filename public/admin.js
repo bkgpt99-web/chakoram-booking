@@ -1,8 +1,13 @@
 import {$,esc,money,today,plusDays,dateLabel,api,message,busy} from './common.js';
-import {createOwnerAlerts} from './owner-alerts.js?v=mixed-rooms-20261118';
+import {createOwnerWall} from './owner-wall.js?v=payments-wall-20261122';
+import {createOwnerPayments,rupeesToPaise,bookingMoney} from './owner-payments.js?v=payments-wall-20261122';
+import {createOwnerAlerts} from './owner-alerts.js?v=payments-wall-20261122';
 let data,session,detailId,manualDraft,dayDate;
-let refreshVersion=0;
-const alerts=createOwnerAlerts({openBooking:openDetail,onChange:refresh,onError:handleError,onCount:n=>{$('stat-sync').textContent=n;$('alerts-count').textContent=n;$('alerts-count').hidden=!n;}});
+let refreshVersion=0,cmCount=0,wallCount=0;
+function alertCount(){const count=cmCount+wallCount;$('alerts-count').textContent=count;$('alerts-count').hidden=!count;}
+const alerts=createOwnerAlerts({openBooking:openDetail,onChange:refresh,onError:handleError,onCount:n=>{$('stat-sync').textContent=n;cmCount=n;alertCount();}});
+const wall=createOwnerWall({openBooking:openDetail,onChange:refresh,onError:handleError,onCount:n=>{wallCount=n;alertCount();}});
+const payments=createOwnerPayments({onError:handleError,onChange:refresh,openBooking:openDetail,showTab});
 const formValues=id=>Object.fromEntries(new FormData($(id)));
 const guestCount=b=>b.guests==null?'Guest count not entered':`${b.guests} guests`;
 const status=b=>b.status==='held'&&new Date(b.expires_at)<new Date()?'expired':b.status;
@@ -11,6 +16,7 @@ function showTab(name){
  document.querySelectorAll('[data-tab]').forEach(b=>{b.classList.toggle('active',b.dataset.tab===name);b.setAttribute('aria-current',b.dataset.tab===name?'page':'false');});
  document.querySelectorAll('.tab-panel').forEach(p=>p.hidden=p.id!==`tab-${name}`);
  document.body.classList.toggle('calendar-screen',name==='calendar'&&!$('workspace').hidden);
+ if(['payments','website'].includes(name))payments.refresh(name);
  if(name==='calendar')requestAnimationFrame(()=>{if(data)renderCalendar();});
 }
 async function refresh(){
@@ -19,12 +25,12 @@ async function refresh(){
  try{
   const next=await api(`/admin/dashboard?month=${month}-01`);
   if(version!==refreshVersion)return;
-  data=next;render();if($('day-dialog').open)openDay(dayDate);await alerts.refresh();
+  data=next;render();if($('day-dialog').open)openDay(dayDate);await Promise.all([alerts.refresh(),wall.refresh(),payments.refreshVisible()]);
  }catch(err){if(version===refreshVersion)handleError(err);}
  finally{if(version===refreshVersion)$('calendar').removeAttribute('aria-busy');}
 }
-function handleError(err){message('admin-message',err.message,'error');if(err.status===401){alerts.stop();document.body.classList.remove('calendar-screen','owner-desk');$('workspace').hidden=true;$('login-panel').hidden=false;$('logout').hidden=true;}}
-async function start(){try{session=await api('/admin/session');$('workspace').hidden=false;$('login-panel').hidden=true;$('logout').hidden=false;$('signed-in').textContent=session.email;$('demo-banner').hidden=!session.demo;document.body.classList.add('owner-desk');showTab('calendar');await refresh();await alerts.start();const booking=new URL(location.href).searchParams.get('booking');if(booking)await openDetail(booking);}catch(err){if(err.status!==401)handleError(err);}}
+function handleError(err){message('admin-message',err.message,'error');if(err.status===401){alerts.stop();wall.stop();document.body.classList.remove('calendar-screen','owner-desk');$('workspace').hidden=true;$('login-panel').hidden=false;$('logout').hidden=true;}}
+async function start(){try{session=await api('/admin/session');$('workspace').hidden=false;$('login-panel').hidden=true;$('logout').hidden=false;$('signed-in').textContent=session.email;$('demo-banner').hidden=!session.demo;document.body.classList.add('owner-desk');showTab('calendar');await refresh();await alerts.start();wall.start();const booking=new URL(location.href).searchParams.get('booking');if(booking)await openDetail(booking);const payment=new URL(location.href).searchParams.get('payment');if(payment){showTab('payments');await payments.open(payment);}const wallBooking=new URL(location.href).searchParams.get('wall');if(wallBooking){showTab('overview');await openDetail(wallBooking);}}catch(err){if(err.status!==401)handleError(err);}}
 function render(){const confirmed=data.bookings.filter(b=>b.status==='confirmed');$('stat-arrivals').textContent=confirmed.filter(b=>b.check_in===today()).length;$('stat-upcoming').textContent=confirmed.filter(b=>b.check_out>today()).length;$('stat-sync').textContent=data.bookings.filter(b=>!b.synced_to_cm&&['confirmed','cancelled','payment_review'].includes(b.status)).length;$('stat-review').textContent=data.bookings.filter(b=>b.attention).length;
  const open=data.settings.booking_open&&data.settings.policy_reviewed&&session.checkout_ready;$('sale-status').textContent=open?session.payment_mode==='live'?'Online bookings open':'Test bookings open':'Online bookings paused';$('sale-status').className=`badge ${open?'':'warn'}`;
  renderCalendar();renderBookings();renderSettings();}
@@ -93,10 +99,12 @@ function openInventory(date,roomId){
  message('inventory-message','');$('inventory-dialog').showModal();
 }
 function renderBookings(){const query=$('booking-search').value.toLowerCase(),filter=$('booking-filter').value;const bookings=data.bookings.filter(b=>`${b.guest_name} ${b.reference} ${b.phone} ${b.source}`.toLowerCase().includes(query)&&(filter==='all'||(filter==='unsynced'?!b.synced_to_cm&&['confirmed','cancelled','payment_review'].includes(b.status):status(b)===filter)));
- $('booking-list').innerHTML=bookings.length?bookings.map(b=>`<article class="reservation"><div><div class="row"><h3>${esc(b.guest_name)}</h3>${badge(b)}${!b.synced_to_cm&&['confirmed','cancelled','payment_review'].includes(b.status)?'<span class="badge warn">Update CM</span>':''}</div><p>${dateLabel(b.check_in)} – ${dateLabel(b.check_out)} · ${esc(b.room_ids.join(', '))} · ${guestCount(b)}</p><span class="meta">${esc(b.reference)} · ${esc(b.source)}</span>${b.attention?`<p class="attention">${esc(b.attention)}</p>`:''}</div><div><div class="money">${money(b.total_paise)}</div>${b.owner_entry?'<p>Reference tariff</p>':''}<p>Paid ${money(b.paid_paise)}</p><button class="button secondary small" data-detail="${b.id}">View reservation</button></div></article>`).join(''):'<div class="empty-state">No reservations match this view.</div>';}
+ $('booking-list').innerHTML=bookings.length?bookings.map(b=>`<article class="reservation"><div><div class="row"><h3>${esc(b.guest_name)}</h3>${badge(b)}${!b.synced_to_cm&&['confirmed','cancelled','payment_review'].includes(b.status)?'<span class="badge warn">Update CM</span>':''}</div><p>${dateLabel(b.check_in)} – ${dateLabel(b.check_out)} · ${esc(b.room_ids.join(', '))} · ${guestCount(b)}</p><span class="meta">${esc(b.reference)} · ${esc(b.source)}</span>${b.attention?`<p class="attention">${esc(b.attention)}</p>`:''}</div><div><div class="money">${bookingMoney(b).sale===null?'Sale not entered':money(bookingMoney(b).sale)}</div><p>Paid ${money(bookingMoney(b).received)}</p><button class="button secondary small" data-detail="${b.id}">View reservation</button></div></article>`).join(''):'<div class="empty-state">No reservations match this view.</div>';}
 function renderSettings(){const form=$('settings-form');if(!form.contains(document.activeElement)){form.elements.booking_open.value=String(data.settings.booking_open);form.elements.deposit_percent.value=String(data.settings.deposit_percent);form.elements.cancellation_policy.value=data.settings.cancellation_policy;form.elements.policy_reviewed.checked=data.settings.policy_reviewed;$('base-rates').innerHTML=data.room_types.map(r=>`<label>${esc(r.name)} · base price (₹)<input type="number" name="rate_${r.id}" min="100" max="1000000" step="0.01" value="${r.rate_paise/100}" required></label><label>${esc(r.name)} · max guests<input type="number" name="guests_${r.id}" min="1" max="6" value="${r.max_guests}" required></label>`).join('');}
  $('seasonal-rates').innerHTML=`<strong>Overrides in the displayed calendar period</strong><br>${data.rates.length?data.rates.map(r=>`${dateLabel(r.stay_date)} · ${esc(r.room_type)} · ${money(r.rate_paise)}`).join('<br>'):'No overrides. Base rates apply.'}`;}
-async function openDetail(id){detailId=id;let b;try{b=await api(`/admin/booking?id=${encodeURIComponent(id)}`);if(detailId!==id)return;const index=data.bookings.findIndex(item=>item.id===id);if(index<0)data.bookings.push(b);else data.bookings[index]=b;}catch(err){handleError(err);return;}message('detail-message','');$('booking-detail').innerHTML=`<h2>${esc(b.guest_name)}</h2><div class="row">${badge(b)}<span class="small muted">${esc(b.reference)}</span></div><table class="confirmation-table"><tr><td>Stay</td><td>${dateLabel(b.check_in)} – ${dateLabel(b.check_out)}</td></tr><tr><td>Rooms</td><td>${esc(b.room_ids.join(', '))}</td></tr><tr><td>Guests</td><td>${b.guests??'Not entered'}</td></tr><tr><td>Source</td><td>${esc(b.source)}</td></tr><tr><td>Contact</td><td>${esc(b.phone||'Not entered')}<br>${esc(b.email||'')}</td></tr><tr><td>${b.owner_entry?'Reference tariff / paid / refunded':'Total / paid / refunded'}</td><td>${money(b.total_paise)} / ${money(b.paid_paise)} / ${money(b.refunded_paise)}</td></tr><tr><td>Payment reference</td><td>${esc(b.payment_id||'No online payment')}</td></tr><tr><td>CM updated</td><td>${b.synced_to_cm?'Yes':'No'}</td></tr></table>${b.guest_note?`<p class="detail-note">${esc(b.guest_note)}</p>`:''}${b.attention?`<div class="notice error">${esc(b.attention)}</div>`:''}<details class="policy-details"><summary>${b.owner_entry?'Website policy for reference':'Agreed cancellation policy'}</summary><p>${esc(b.policy)}</p></details><div class="booking-detail-actions">${status(b)==='confirmed'?'<button class="button" id="edit-reservation">Edit booking details</button>':''}<button class="button" id="mark-sync">${b.synced_to_cm?'Mark CM update needed':'Mark CM updated'}</button>${b.order_id?'<button class="button secondary" id="reconcile">Recheck payment</button>':''}${['confirmed','held','payment_review'].includes(status(b))?'<button class="button secondary" id="cancel-reservation">Cancel reservation</button>':''}${b.phone?`<a class="button secondary" href="https://wa.me/${esc(b.phone.replace(/\D/g,''))}?text=${encodeURIComponent(`Hello ${b.guest_name}, regarding your Chakoram reservation ${b.reference}.`)}" target="_blank" rel="noopener">WhatsApp guest</a>`:''}</div>`;
+async function openDetail(id){detailId=id;let b;try{b=await api(`/admin/booking?id=${encodeURIComponent(id)}`);if(detailId!==id)return;const index=data.bookings.findIndex(item=>item.id===id);if(index<0)data.bookings.push(b);else data.bookings[index]=b;}catch(err){handleError(err);return;}message('detail-message','');$('booking-detail').innerHTML=`<h2>${esc(b.guest_name)}</h2><div class="row">${badge(b)}<span class="small muted">${esc(b.reference)}</span></div><table class="confirmation-table"><tr><td>Stay</td><td>${dateLabel(b.check_in)} – ${dateLabel(b.check_out)}</td></tr><tr><td>Rooms</td><td>${esc(b.room_ids.join(', '))}</td></tr><tr><td>Guests</td><td>${b.guests??'Not entered'}</td></tr><tr><td>Source</td><td>${esc(b.source)}</td></tr><tr><td>Contact</td><td>${esc(b.phone||'Not entered')}<br>${esc(b.email||'')}</td></tr><tr><td>Sale amount</td><td>${bookingMoney(b).sale===null?'Not entered':money(bookingMoney(b).sale)}</td></tr><tr><td>Received / balance due</td><td>${money(bookingMoney(b).received)} / ${bookingMoney(b).balance===null?'Enter sale amount':money(bookingMoney(b).balance)}</td></tr><tr><td>Razorpay paid / refunded</td><td>${money(b.paid_paise)} / ${money(b.refunded_paise)}</td></tr><tr><td>Payment reference</td><td>${esc(b.payment_id||'No online payment')}</td></tr>${b.wall?`<tr><td>Booking wall updated</td><td>${b.wall.pending?'No — update needed':'Yes'}</td></tr>`:''}<tr><td>CM updated</td><td>${b.synced_to_cm?'Yes':'No'}</td></tr></table>${b.guest_note?`<p class="detail-note">${esc(b.guest_note)}</p>`:''}${b.attention?`<div class="notice error">${esc(b.attention)}</div>`:''}<details class="policy-details"><summary>${b.owner_entry?'Website policy for reference':'Agreed cancellation policy'}</summary><p>${esc(b.policy)}</p></details><div class="booking-detail-actions"><button class="button secondary" id="view-payments">Payment details</button>${b.wall?`<button class="button secondary" id="mark-wall">${b.wall.pending?'Booking wall updated':'Mark wall update needed'}</button>`:''}${status(b)==='confirmed'?'<button class="button" id="edit-reservation">Edit booking details</button>':''}<button class="button" id="mark-sync">${b.synced_to_cm?'Mark CM update needed':'Mark CM updated'}</button>${b.order_id?'<button class="button secondary" id="reconcile">Recheck payment</button>':''}${['confirmed','held','payment_review'].includes(status(b))?'<button class="button secondary" id="cancel-reservation">Cancel reservation</button>':''}${b.phone?`<a class="button secondary" href="https://wa.me/${esc(b.phone.replace(/\D/g,''))}?text=${encodeURIComponent(`Hello ${b.guest_name}, regarding your Chakoram reservation ${b.reference}.`)}" target="_blank" rel="noopener">WhatsApp guest</a>`:''}</div>`;
+ if($('mark-wall'))$('mark-wall').onclick=()=>busy($('mark-wall'),async()=>{try{await wall.ack(b.wall,b.wall.pending);await openDetail(id);message('detail-message','Booking wall status saved.','success');}catch(err){if(err.code==='WALL_STALE')await openDetail(id);message('detail-message',err.message,'error');}});
+ $('view-payments').onclick=()=>{$('detail-dialog').close();payments.open(id);};
  if($('edit-reservation'))$('edit-reservation').onclick=()=>{$('detail-dialog').close();openManual(b);};
  $('mark-sync').onclick=()=>detailAction('/admin/sync',{id,synced:!b.synced_to_cm,revision:b.cm_revision});if($('reconcile'))$('reconcile').onclick=()=>detailAction('/admin/reconcile',{id});if($('cancel-reservation'))$('cancel-reservation').onclick=()=>$('cancel-dialog').showModal();if(!$('detail-dialog').open)$('detail-dialog').showModal();}
 async function detailAction(path,body){try{await api(path,body);if(path==='/admin/sync'&&body.synced)await alerts.closeNotifications(body.id);await refresh();await openDetail(detailId);message('detail-message','Reservation updated.','success');}catch(err){if(err.code==='PUSH_STALE'){await refresh();await openDetail(detailId);}message('detail-message',err.message,'error');}}
@@ -194,14 +202,27 @@ function openManual(booking=null,options={}){
  f.elements.source.value=booking?.source||'Direct';
  if(!f.elements.source.value)f.elements.source.value='Other';
  f.elements.source.disabled=booking?.source==='website';
- $('manual-price-note').textContent=booking?'Saving changes preserves the recorded amount and payment history. Handle any extra charges or refunds separately. Update Yanolja after a change.':'The website tariff is recorded for reference. Track OTA rates and offline receipts in your accounts. Closed dates remain closed after cancellation.';
+ const amounts=booking?bookingMoney(booking):null;
+ f.elements.sale.value=amounts?.sale==null?'':(amounts.sale/100).toFixed(2);
+ f.elements.advance.value=amounts?(amounts.received/100).toFixed(2):'';
+ $('manual-received-label').textContent=booking?'Received so far (₹)':'Advance received (₹)';
+ f.elements.sale.disabled=!!booking;f.elements.advance.disabled=!!booking;
+ $('manual-payment-help').textContent=booking?'Received includes all recorded payments. Use Payment details to change the sale amount or record further collections.':'Enter the agreed total and advance already received. Leave sale blank if not yet known.';
+ updateManualBalance();
+ $('manual-price-note').textContent=booking?'Saving booking details preserves payment records. Use Payment details for collections. Update Yanolja after a change.':'The sale amount applies to all selected rooms for the full stay. Closed dates remain closed after cancellation.';
  renderManualRooms(booking?.room_ids||(options.roomId?[options.roomId]:undefined),true);message('manual-message','');$('manual-dialog').showModal();
 }
 $('open-manual').onclick=()=>openManual();$('add-calendar-booking').onclick=()=>openManual();
 $('close-manual').onclick=()=>$('manual-dialog').close();
 $('select-all-manual').onclick=()=>renderManualRooms(data.rooms.map(r=>r.id));
 $('clear-manual-rooms').onclick=()=>renderManualRooms([]);
+function updateManualBalance(){
+ const f=$('manual-form');
+ try{const sale=rupeesToPaise(f.elements.sale.value),advance=rupeesToPaise(f.elements.advance.value,0);$('manual-balance').value=sale===null?'':((sale-advance)/100).toFixed(2);}
+ catch{$('manual-balance').value='';}
+}
 $('manual-form').oninput=e=>{
+ if(['sale','advance'].includes(e.target.name))updateManualBalance();
  if(e.target.name==='guest_name'&&!e.isComposing)uppercaseManualGuestName();
  if(e.target.name==='check_in')updateManualCheckout(true);
  manualAvailabilityHint();
@@ -215,6 +236,7 @@ $('manual-form').onsubmit=async e=>{
    const v=formValues('manual-form'),room_ids=selectedManualRooms();
    if(!room_ids.length)throw new Error('Select at least one room for this stay.');
    const payload={...manualDraft,...v,room_ids,guests:v.guests===''?null:Number(v.guests)};
+   if(!manualDraft.id)Object.assign(payload,{sale_amount_paise:rupeesToPaise(v.sale),advance_paise:rupeesToPaise(v.advance,0)});
    const res=await api('/admin/save-booking',payload);
    $('manual-dialog').close();$('calendar-start').value=res.booking.check_in.slice(0,7);
    await refresh();await openDetail(res.booking.id);message('detail-message','Booking saved. Update Yanolja separately.','success');
