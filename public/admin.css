@@ -107,3 +107,6 @@ body.calendar-screen{height:100vh;height:100dvh;display:flex;flex-direction:colu
 @media(max-width:380px){.kpi-grid{gap:8px}.kpi-tile{padding:11px}.kpi-tile strong{font-size:1.15rem}}
 
 #kpi-filters{grid-template-columns:1fr 1fr 1.25fr auto;align-items:end}#kpi-filters button{white-space:nowrap}@media(max-width:700px){#kpi-filters{grid-template-columns:1fr 1fr}#kpi-filters button{align-self:end}}
+
+.kpi-source-summary{padding:12px 16px;border-left:3px solid #508269;background:#edf4ee;color:#294c3f;font-size:.84rem;line-height:1.65;margin:14px 0;overflow-wrap:anywhere}
+.kpi-date-presets{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.kpi-date-presets .button{white-space:normal;min-height:40px}

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-import {calculateSalePaise,checkoutFor,stayNights,mealPlanLabel} from '../public/booking-tools.js';
+import {calculateSalePaise,checkoutFor,stayNights,mealPlanLabel,isUpcomingBooking,bookingSourceLabel} from '../public/booking-tools.js';
 
 test('sale calculator handles room nights, mixed rates, discounts and exact rounding',()=>{
  for(const [expression,paise] of [
@@ -37,4 +37,17 @@ test('plan labels spell out meals and leave unknown legacy plans explicit',()=>{
  assert.match(mealPlanLabel('ep'),/Room only/);assert.match(mealPlanLabel('cp'),/Breakfast/);
  assert.match(mealPlanLabel('ap'),/Breakfast, lunch & dinner/);assert.equal(mealPlanLabel(null),'Meal plan not set');
  assert.equal(mealPlanLabel('package','Breakfast and transfers'),'Package — Breakfast and transfers');
+});
+
+test('upcoming arrivals include today and future dates, excluding past, cancelled and checked-in stays',()=>{
+ const base={status:'confirmed',check_in:'2026-11-27',check_out:'2026-11-28',kpi:{}};
+ assert.equal(isUpcomingBooking(base,'2026-11-27'),true);
+ assert.equal(isUpcomingBooking({...base,check_in:'2027-01-01'},'2026-11-27'),true);
+ assert.equal(isUpcomingBooking({...base,check_in:'2026-11-26'},'2026-11-27'),false);
+ for(const status of ['cancelled','held','expired','payment_review'])assert.equal(isUpcomingBooking({...base,status},'2026-11-27'),false);
+ for(const stay_status of ['in_house','checked_out','no_show'])assert.equal(isUpcomingBooking({...base,kpi:{stay_status}},'2026-11-27'),false);
+ const rows=[{...base,id:'later',check_in:'2027-01-01'},{...base,id:'past',check_in:'2026-11-26'},{...base,id:'today'}];
+ assert.deepEqual(rows.filter(b=>isUpcomingBooking(b,'2026-11-27')).sort((a,b)=>a.check_in.localeCompare(b.check_in)).map(b=>b.id),['today','later']);
+ assert.equal(bookingSourceLabel('MMT/Goibibo'),'MakeMyTrip / Goibibo');
+ assert.equal(bookingSourceLabel('website'),'Guest website booking');
 });

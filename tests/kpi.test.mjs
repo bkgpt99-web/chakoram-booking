@@ -127,3 +127,22 @@ test('RLS and RPC grants protect KPI data while service role performs capture',a
  for(const role of ['anon','authenticated']){await db.exec(`set role ${role}`);await assert.rejects(()=>db.query('select * from ch_kpi_ledger'),/permission denied/);await assert.rejects(()=>db.query("select ch_kpi('data','{}')"),/permission denied/);await assert.rejects(()=>db.query("select ch_kpi_owner_booking('{}')"),/permission denied/);await db.exec('reset role');}
  await db.exec('set role service_role');const b=await s.ownerRpc(input({kpi:dataKpi()}));assert.ok(b.id);const d=await s.kpiRpc('data',{start:today,end:day(3)});assert.equal(d.bookings.length,1);await db.exec('reset role');
 });
+
+test('manual OTA sources persist through save and edit and are reported by stay month, not entry method',async()=>{
+ const m=new Date(today+'T12:00:00Z');m.setUTCDate(1);m.setUTCMonth(m.getUTCMonth()+1);const next=m.toISOString().slice(0,10),out=dateString(dateNumber(next)+1);
+ const direct=await s.ownerRpc(validateOwnerBooking(input({room_ids:['D1'],guests:2,check_in:today,check_out:day(1),source:'Direct'})));
+ const ota=[];for(const [index,source] of ['Expedia','MMT/Goibibo','Booking.com'].entries())ota.push(await s.ownerRpc(validateOwnerBooking(input({room_ids:['D'+(index+1)],guests:2,check_in:next,check_out:out,source}))));
+ assert.ok(ota.every(b=>b.owner_entry));assert.deepEqual(ota.map(b=>b.source),['Expedia','MMT/Goibibo','Booking.com']);
+ const data=await s.kpiRpc('data',{start:today,end:out});
+ const thisMonth=buildKpiReport(data,reportRange({start:today,end:today},Error,today)).current;
+ assert.equal(thisMonth.direct_share_percent,100);assert.equal(thisMonth.ota_share_percent,0);assert.equal(thisMonth.reservations,1);
+ const nextMonth=buildKpiReport(data,reportRange({start:next,end:next},Error,today)).current;
+ assert.equal(nextMonth.direct_share_percent,0);assert.equal(nextMonth.ota_share_percent,100);assert.equal(nextMonth.reservations,3);
+ assert.deepEqual(new Set(nextMonth.sources.map(s=>s.source)),new Set(['Expedia','MMT/Goibibo','Booking.com']));
+ let b=ota[0];b=await s.ownerRpc(validateOwnerBooking({...b,revision:b.owner_revision,source:'Agoda'}));assert.equal(b.source,'Agoda');
+ for(const key of ['sale_amount_paise','offline_received_paise','paid_paise','refunded_paise'])assert.equal(b[key],ota[0][key]);
+ const changed=buildKpiReport(await s.kpiRpc('data',{start:next,end:next}),reportRange({start:next,end:next},Error,today)).current;
+ assert.ok(changed.sources.some(s=>s.source==='Agoda'));assert.ok(!changed.sources.some(s=>s.source==='Expedia'));
+ assert.equal(changed.ota_share_percent,100);
+ assert.throws(()=>validateOwnerBooking(input({source:''})),/Choose a booking source/);
+});

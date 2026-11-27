@@ -284,3 +284,17 @@ Apply `supabase/migrations/20261127013640_owner_kpi_dashboard.sql` after all ear
 KPI wrappers keep legacy owner/payment RPC behaviour and omit booking tokens from responses. Booking creation, allocation and advance entry are atomic. Mutations retain revision checks and idempotent request keys. Legacy price edits and gateway refunds invalidate old revenue confirmations instead of silently reusing stale splits. Existing Yanolja, wall and payment reminders remain independent.
 
 Validation: `npm test` covers occupancy, maintenance, complimentary stays, cross-month paise conservation, unavailable revenue, actual-vs-booked periods, cohort cancellation rates, ledger corrections, atomic allocation changes, legacy compatibility, full-history reports, authentication/origin checks and service-only access. Browser sample workflows covered mixed-room capture, allocation, expense entry, sale amendment, guest count correction and the full-month calendar.
+
+## Upcoming arrivals and booking-source clarity — 27 November 2026
+
+**Reservations → Status → Upcoming** shows confirmed arrivals today or later, earliest check-in first. It excludes cancelled/held bookings and guests marked in house, checked out or no-show. Dates follow India time. The Upcoming stays count uses the same rule.
+
+New owner bookings require an explicit **Booking source** selection instead of defaulting to Direct. Existing bookings retain their saved source. To correct an owner-entered reservation, use **View reservation → Edit booking details → Booking source**. Guest-created website reservations keep their website source.
+
+The dashboard source mix uses the selected stay dates, not the date a reservation was entered. A current month with only Direct stays can therefore show 100% Direct even when OTA reservations exist in later months. **Next month** and **Next 90 days** switch to Booked performance and include those future stays. The summary displays each selected source and stay count; the source table and CSV also show room-night shares. Direct share groups Direct, website, phone and walk-in; Expedia, MakeMyTrip/Goibibo, Booking.com and other OTA selections retain their channel classification even when the owner enters them manually.
+
+This update needs no new database migration or environment variable. It does not reclassify existing reservations. Validation includes 100 passing tests, source persistence through save/edit, stay-month filtering, and a browser sample Expedia booking appearing in the next-month source breakdown.
+
+### Dashboard date shortcuts
+
+The dashboard offers **Last month**, **This month**, **Current financial year** and **Last financial year** buttons, alongside the future-date shortcuts. Each fills both dates and refreshes the report immediately. Financial years run from 1 April to 31 March, determined using India's current date. For example, on 27 November 2026, Current financial year selects 1 April 2026–31 March 2027; Last financial year selects 1 April 2025–31 March 2026. The selected Booked/Actual view is preserved; Actual reports still stop at yesterday. Custom date entry remains available. No database or environment changes are needed.

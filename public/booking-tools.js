@@ -61,3 +61,15 @@ export function calculateSalePaise(expression){
  if(result.n<0n||result.n>10000000n*result.d)throw new Error('The sale amount must be between ₹0 and ₹1,00,00,000.');
  return Number((result.n*200n+result.d)/(2n*result.d));
 }
+
+// Upcoming means arrivals today or later, not guests already checked in.
+// The caller supplies today's India calendar date (rather than the device timezone).
+export function isUpcomingBooking(booking,today){
+ return booking.status==='confirmed'&&typeof booking.check_in==='string'&&booking.check_in>=today
+  &&!['in_house','checked_out','no_show'].includes(booking.kpi?.stay_status);
+}
+export function bookingSourceLabel(source){
+ return ({Direct:'Direct booking',website:'Guest website booking',phone:'Phone / WhatsApp','walk-in':'Walk-in',
+  'Booking.com':'Booking.com',Agoda:'Agoda',Airbnb:'Airbnb',Expedia:'Expedia / Hotels.com',
+  'MMT/Goibibo':'MakeMyTrip / Goibibo',OTA:'Other OTA',Other:'Other'})[source]||source||'Source not entered';
+}
