@@ -175,3 +175,39 @@ test('payment notification opens the Payments reservation and uses a separate re
  let pending;const id=randomUUID();listeners.push({data:{json:()=>paymentNotificationFor({stage:'arrival',event_date:date(1),booking:{id,guest_name:'SAMPLE GUEST',balance_paise:10000,reference:'SAMPLE'}})},waitUntil:p=>pending=p});await pending;
  assert.equal(shown[0].data.url,`/admin?payment=${id}`);assert.match(shown[0].tag,/chakoram-payment/);
 });
+
+test('owner meal plans persist across create, edit, reports and old clients without changing payments',async()=>{
+ const i=validateOwnerBooking(input({meal_plan:'package',meal_plan_note:'Breakfast and airport transfers',sale_amount_paise:1200000,advance_paise:200000}));
+ let b=await s.ownerRpc(i);assert.equal(b.meal_plan,'package');assert.equal(b.meal_plan_note,i.meal_plan_note);
+ assert.equal((await s.ownerRpc(i)).id,b.id);
+ await assert.rejects(()=>s.ownerRpc({...i,meal_plan:'ep'}),{code:'OWNER_REQUEST_REUSED'});
+ assert.equal((await s.ownerDashboard(date(1))).bookings.find(v=>v.id===b.id).meal_plan,'package');
+ assert.equal((await s.financeRpc('list',{})).rows[0].meal_plan,'package');
+ const saved=await details(b.id);
+ const edit=extra=>validateOwnerBooking(input({id:b.id,revision:b.owner_revision,...extra}));
+ b=await s.ownerRpc(edit({guest_name:'UPDATED GUEST'}));assert.equal(b.meal_plan,'package');assert.equal(b.meal_plan_note,i.meal_plan_note);
+ const stale=edit({meal_plan:'cp'});
+ b=await s.ownerRpc(edit({meal_plan:'ap'}));assert.equal(b.meal_plan,'ap');assert.equal(b.meal_plan_note,'');
+ await assert.rejects(()=>s.ownerRpc(stale),{code:'OWNER_STALE'});
+ const updated=await details(b.id);
+ for(const k of ['sale_amount_paise','paid_paise','offline_received_paise','balance_paise'])assert.equal(updated.booking[k],saved.booking[k]);
+ assert.equal(updated.receipts.length,saved.receipts.length);
+ b=await s.ownerRpc(edit({meal_plan:''}));assert.equal(b.meal_plan,null);
+});
+test('invalid meal plans fail both API and database validation',async()=>{
+ for(const extra of [{meal_plan:'unknown'},{meal_plan:42},{meal_plan:{}},{meal_plan_note:'a'.repeat(201)}]){
+  assert.throws(()=>validateOwnerBooking(input(extra)));
+  await assert.rejects(()=>s.ownerRpc(input(extra)),{code:'OWNER_INVALID_PLAN'});
+ }
+ assert.equal((await s.ownerRpc(input())).meal_plan,null);
+});
+test('arrival reminders read the latest plan at send time and departure reminders keep collection wording',async()=>{
+ let b=await s.ownerRpc(input({sale_amount_paise:100000,meal_plan:'cp'}));await device();
+ const task=(await claim())[0];let current=await s.paymentReminderRpc('current',task);
+ assert.equal(current.booking.meal_plan,'cp');assert.match(paymentNotificationFor(current).body,/CP — Breakfast/);
+ b=await s.ownerRpc(input({id:b.id,revision:b.owner_revision,meal_plan:'package',meal_plan_note:'All meals and transfers'}));
+ current=await s.paymentReminderRpc('current',task);
+ const arrival=paymentNotificationFor(current);assert.match(arrival.body,/SAMPLE GUEST · Package — All meals and transfers/);assert.match(arrival.body,/Balance/);
+ assert.doesNotMatch(paymentNotificationFor({...current,stage:'departure'}).body,/Package/);
+ assert.match(paymentNotificationFor({...current,booking:{...current.booking,meal_plan:null}}).body,/Meal plan not set/);
+});

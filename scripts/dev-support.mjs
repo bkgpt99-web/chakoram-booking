@@ -15,14 +15,17 @@ export async function createLocalDatabase(path){
   await db.exec(await readFile(new URL('../supabase/migrations/20261118154333_owner_mixed_room_booking.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261121073551_owner_payment_collections.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261122104009_owner_booking_wall.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261126072259_owner_meal_plans.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261127013640_owner_kpi_dashboard.sql',import.meta.url),'utf8'));
   const rpc=async(action,input={})=>{try{const r=await db.query('select ch_engine($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};
   const pushRpc=async(action,input={})=>{try{const r=await db.query('select ch_push($1,$2::jsonb) as result',[action,JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw pushDatabaseError(e);}};
-  const ownerRpc=async(input)=>{try{const r=await db.query('select ch_owner_booking($1::jsonb) as result',[JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};
+  const ownerRpc=async(input)=>{try{const r=await db.query('select ch_kpi_owner_booking($1::jsonb) as result',[JSON.stringify(input)]);return r.rows[0].result;}catch(e){throw dbError(e.message);}};
   const ownerDashboard=async(month)=>{const r=await db.query('select ch_owner_dashboard($1::date) as result',[month]);return r.rows[0].result;};
-  const financeRpc=async(action,input={})=>{try{return (await db.query('select ch_payments($1,$2::jsonb) as result',[action,JSON.stringify(input)])).rows[0].result;}catch(e){throw dbError(e.message);}};
+  const financeRpc=async(action,input={})=>{try{return (await db.query('select ch_kpi_payments($1,$2::jsonb) as result',[action,JSON.stringify(input)])).rows[0].result;}catch(e){throw dbError(e.message);}};
   const paymentReminderRpc=async(action,input={})=>(await db.query('select ch_payment_push($1,$2::jsonb) as result',[action,JSON.stringify(input)])).rows[0].result;
   const wallRpc=async(action,input={})=>{try{return (await db.query('select ch_wall($1,$2::jsonb) as result',[action,JSON.stringify(input)])).rows[0].result;}catch(e){throw dbError(e.message);}};
-  return {db,rpc,pushRpc,ownerRpc,ownerDashboard,financeRpc,paymentReminderRpc,wallRpc};
+  const kpiRpc=async(action,input={})=>{try{return (await db.query('select ch_kpi($1,$2::jsonb) as result',[action,JSON.stringify(input)])).rows[0].result;}catch(e){throw dbError(e.message);}};
+  return {db,kpiRpc,rpc,pushRpc,ownerRpc,ownerDashboard,financeRpc,paymentReminderRpc,wallRpc};
 }
 export async function seedDemo(db){
   await db.exec(`update ch_settings set booking_open=true,policy_reviewed=true,

@@ -1,3 +1,6 @@
+import {attachKpiCapture} from './kpi-capture.js?v=kpi-20261127';
+import {mealPlanLabel,stayNights} from './booking-tools.js';
+import {attachSaleCalculator} from './owner-calculator.js';
 import {$,esc,money,today,dateLabel,api,message,busy} from './common.js';
 export function rupeesToPaise(value,blank=null){
  const s=String(value??'').trim();if(!s)return blank;
@@ -13,6 +16,9 @@ export function bookingMoney(b){
 export function createOwnerPayments({onError,onChange,openBooking,showTab}){
  const state={payments:{offset:0,version:0},website:{offset:0,version:0}};
  let detail,detailVersion=0,receiptKey,selectedReceipt;
+ const kpiCapture=attachKpiCapture($('payment-kpi'),{getBooking:()=>detail,getSale:()=>rupeesToPaise($('payment-sale-form').elements.sale.value)});
+ $('payment-sale-form').elements.sale.addEventListener('input',()=>kpiCapture.total());
+ const calculator=attachSaleCalculator($('payment-sale-calculator'),$('payment-sale-form').elements.sale,{getStay:()=>({nights:detail?stayNights(detail.check_in,detail.check_out):1,rooms:detail?.room_ids.length||1})});
  const filters=type=>{
   const f=Object.fromEntries(new FormData($(`${type}-filters`)));
   return {...f,limit:50,offset:state[type].offset};
@@ -30,7 +36,7 @@ export function createOwnerPayments({onError,onChange,openBooking,showTab}){
  function rows(type,r){
   $(`${type}-list`).innerHTML=r.rows.length?r.rows.map(b=>{
    const unpriced=b.sale_amount_paise===null;
-   return `<article class="collection-row"><div class="collection-guest"><h3>${esc(b.guest_name)}</h3><p>${dateLabel(b.check_in)} → ${dateLabel(b.check_out)}</p><p>${esc(b.room_ids.join(', '))} · ${esc(b.reference)} · ${esc(b.source)}</p>${type==='website'?`<span class="badge">${esc(b.display_status.replaceAll('_',' '))}</span>`:''}</div><dl class="collection-amounts"><div><dt>Sale amount</dt><dd>${unpriced?'Not entered':money(b.sale_amount_paise)}</dd></div><div><dt>Received</dt><dd>${money(b.received_paise)}</dd></div><div><dt>${b.status==='confirmed'?'Balance due':'Unpaid amount'}</dt><dd class="balance-amount">${unpriced?'—':money(b.balance_paise)}</dd></div></dl><button class="button ${type==='website'?'secondary ':''}small" data-payment="${esc(b.id)}">${unpriced?'Enter sale amount':b.balance_paise>0&&b.status==='confirmed'?'Collect payment':'Payment details'}</button></article>`;
+   return `<article class="collection-row"><div class="collection-guest"><h3>${esc(b.guest_name)}</h3><p>${dateLabel(b.check_in)} → ${dateLabel(b.check_out)}</p><p>${esc(b.room_ids.join(', '))} · ${esc(b.reference)} · ${esc(b.source)}</p><p>${esc(mealPlanLabel(b.meal_plan,b.meal_plan_note))}</p>${type==='website'?`<span class="badge">${esc(b.display_status.replaceAll('_',' '))}</span>`:''}</div><dl class="collection-amounts"><div><dt>Sale amount</dt><dd>${unpriced?'Not entered':money(b.sale_amount_paise)}</dd></div><div><dt>Received</dt><dd>${money(b.received_paise)}</dd></div><div><dt>${b.status==='confirmed'?'Balance due':'Unpaid amount'}</dt><dd class="balance-amount">${unpriced?'—':money(b.balance_paise)}</dd></div></dl><button class="button ${type==='website'?'secondary ':''}small" data-payment="${esc(b.id)}">${unpriced?'Enter sale amount':b.balance_paise>0&&b.status==='confirmed'?'Collect payment':'Payment details'}</button></article>`;
   }).join(''):`<div class="empty-state">${type==='payments'?'No pending collections match this view.':'No guest website bookings match these filters.'}</div>`;
   const count=r.rows.length;
   $(`${type}-page`).textContent=r.total?`${r.offset+1}–${r.offset+count} of ${r.total}`:'0 reservations';
@@ -44,7 +50,7 @@ export function createOwnerPayments({onError,onChange,openBooking,showTab}){
    stats(type,r);rows(type,r);
    if(type==='payments'){
     $('payment-reminders').checked=r.reminders_enabled;
-    $('payment-device-status').textContent=`${r.device_count} alert ${r.device_count===1?'device':'devices'} connected. Reminders show guest names and the current balance. ${r.device_count?'Manage devices in Alerts.':'Enable phone alerts in the Alerts tab to receive reminders.'}`;
+    $('payment-device-status').textContent=`${r.device_count} alert ${r.device_count===1?'device':'devices'} connected. Reminders show guest names and the current balance. Before check-in, they also show the meal plan. ${r.device_count?'Manage devices in Alerts.':'Enable phone alerts in the Alerts tab to receive reminders.'}`;
    }
   }catch(e){if(version===state[type].version)error(`${type}-message`,e);}
   finally{if(version===state[type].version)$(`${type}-list`).removeAttribute('aria-busy');}
@@ -52,11 +58,11 @@ export function createOwnerPayments({onError,onChange,openBooking,showTab}){
  function renderDetail(result){
   detail=result.booking;receiptKey=crypto.randomUUID();selectedReceipt=null;
   const b=detail,editable=b.status==='confirmed',website=b.source==='website'&&!b.owner_entry;
-  $('payment-guest').textContent=b.guest_name;$('payment-stay').textContent=`${b.reference} · ${dateLabel(b.check_in)} – ${dateLabel(b.check_out)} · ${b.room_ids.join(', ')} · ${b.source}`;
+  $('payment-guest').textContent=b.guest_name;$('payment-stay').textContent=`${b.reference} · ${dateLabel(b.check_in)} – ${dateLabel(b.check_out)} · ${b.room_ids.join(', ')} · ${b.source} · ${stayNights(b.check_in,b.check_out)} nights · ${mealPlanLabel(b.meal_plan,b.meal_plan_note)}`;
   $('payment-detail-summary').innerHTML=[['Sale amount',b.sale_amount_paise===null?'Not entered':money(b.sale_amount_paise)],['Received',money(b.received_paise)],['Balance',b.balance_paise===null?'Enter sale amount':money(b.balance_paise)]]
    .map(([label,value])=>`<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
   $('payment-account-note').textContent=`Razorpay received (after refunds): ${money(b.gateway_received_paise)}. Recorded separately: ${money(b.offline_received_paise)}.${b.credit_paise?` Credit above the sale amount: ${money(b.credit_paise)}.`:''}${!editable?' This reservation is not confirmed. No new payments can be entered.':''}`;
-  const price=$('payment-sale-form');price.hidden=website||!editable;price.elements.sale.value=b.sale_amount_paise===null?'':(b.sale_amount_paise/100).toFixed(2);
+  const price=$('payment-sale-form');price.hidden=website||!editable;price.elements.sale.value=b.sale_amount_paise===null?'':(b.sale_amount_paise/100).toFixed(2);calculator.reset();kpiCapture.load(b);
   const form=$('payment-receipt-form');form.hidden=!editable||!b.balance_paise;form.reset();form.elements.amount.max=(b.balance_paise/100).toFixed(2);form.elements.amount.value=b.balance_paise>0?(b.balance_paise/100).toFixed(2):'';
   $('payment-ledger').innerHTML=result.receipts.length?result.receipts.map(r=>`<article class="receipt-row ${r.voided_at?'receipt-void':''}"><div><strong>${money(r.amount_paise)} · ${esc(({cash:'Cash',upi:'UPI',bank:'Bank transfer',ota:'OTA remittance',other:'Other'})[r.method])}</strong><p>${new Date(r.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})} IST${r.note?` · ${esc(r.note)}`:''}</p>${r.voided_at?`<p>Corrected: ${esc(r.void_reason)}</p>`:''}</div>${r.voided_at?'<span class="badge">Voided</span>':`<button class="text-button" data-void="${r.id}">Correct entry</button>`}</article>`).join(''):'<p class="muted">No payments have been entered manually.</p>';
   $('payment-correction-form').hidden=true;
@@ -87,7 +93,7 @@ export function createOwnerPayments({onError,onChange,openBooking,showTab}){
  $('payment-alerts-link').onclick=()=>showTab('overview');
  $('close-payment').onclick=()=>{$('payment-dialog').close();detailVersion++;};
  $('payment-view-booking').onclick=()=>{$('payment-dialog').close();openBooking(detail.id);};
- $('payment-sale-form').onsubmit=e=>{e.preventDefault();try{save('save_sale',{sale_amount_paise:rupeesToPaise(e.target.elements.sale.value)},e.submitter);}catch(err){error('payment-detail-message',err);}};
+ $('payment-sale-form').onsubmit=e=>{e.preventDefault();try{save('save_sale',{sale_amount_paise:rupeesToPaise(e.target.elements.sale.value),kpi:kpiCapture.read()},e.submitter);}catch(err){error('payment-detail-message',err);}};
  $('payment-receipt-form').onsubmit=e=>{e.preventDefault();try{const f=e.target.elements;save('receipt',{request_key:receiptKey,amount_paise:rupeesToPaise(f.amount.value),method:f.method.value,note:f.note.value},e.submitter);}catch(err){error('payment-detail-message',err);}};
  $('payment-ledger').onclick=e=>{const b=e.target.closest('[data-void]');if(b){selectedReceipt=b.dataset.void;$('payment-correction-form').hidden=false;$('payment-correction-form').elements.reason.value='';$('payment-correction-form').elements.reason.focus();}};
  $('payment-correction-form').onsubmit=e=>{e.preventDefault();save('void',{receipt_id:selectedReceipt,reason:e.target.elements.reason.value},e.submitter);};
@@ -96,7 +102,7 @@ export function createOwnerPayments({onError,onChange,openBooking,showTab}){
   try{
    const query={...filters('website'),limit:100,offset:0},all=[];let result;
    do{result=await get('website',query);all.push(...result.rows);query.offset+=result.rows.length;}while(result.rows.length&&all.length<result.total);
-   const cols=['reference','guest_name','check_in','check_out','room_ids','display_status','sale_amount_paise','received_paise','balance_paise','created_at'];
+   const cols=['reference','guest_name','check_in','check_out','meal_plan','meal_plan_note','room_ids','display_status','sale_amount_paise','received_paise','balance_paise','created_at'];
    const cell=v=>`"${String(v??'').replace(/^[\s]*[=+@-]/,"'$&").replaceAll('"','""')}"`;
    const csv=[cols.map(k=>k.replace('_paise','_INR')), ...all.map(b=>cols.map(k=>k.endsWith('_paise')?(b[k]===null?'':(b[k]/100).toFixed(2)):b[k]))].map(row=>row.map(cell).join(',')).join('\r\n');
    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download=`Chakoram-website-bookings-${today()}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);

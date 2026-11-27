@@ -1,3 +1,4 @@
+import {mealPlanLabel} from '../public/booking-tools.js';
 // Owner accounting is separate from gateway capture/refund records.
 export const MAX_PAISE=1000000000;
 export function financeFor(b){
@@ -36,8 +37,9 @@ export function validatePaymentInput(action,input,ErrorClass){
 export function paymentNotificationFor(task){
  const b=task.booking,amount=new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(b.balance_paise/100);
  const stage=task.stage==='arrival'?'check-in':'checkout';
+ const plan=task.stage==='arrival'?` · ${mealPlanLabel(b.meal_plan,b.meal_plan_note)}`:'';
  return {title:`Collect payment: ${stage} tomorrow`,
-   body:`${b.guest_name} · Balance ${amount} · ${b.reference}. ${stage==='check-in'?'Check-in':'Checkout'} ${task.event_date}. Open Payments after collecting.`,
+   body:`${b.guest_name}${plan} · Balance ${amount} · ${b.reference}. ${stage==='check-in'?'Check-in':'Checkout'} ${task.event_date}. Open Payments after collecting.`,
    kind:'payment',stage:task.stage,event_date:task.event_date,booking_id:b.id,
    tag:`chakoram-payment-${b.id}-${task.stage}-${task.event_date}`};
 }

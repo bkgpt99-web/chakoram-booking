@@ -1,3 +1,4 @@
+import {buildKpiReport,reportRange,validateKpiCapture} from './kpi.mjs';
 import {financeFor,validatePaymentInput,MAX_PAISE} from './payments.mjs';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
@@ -52,6 +53,15 @@ export function validateOwnerBooking(input) {
   if(typeof email!=='string'||email.length>180||(email.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))) throw new AppError('Enter a valid email or leave it blank.');
   if(typeof phone!=='string'||(phone.trim()&&!/^\+?[0-9 ()-]{7,22}$/.test(phone.trim()))) throw new AppError('Enter a valid phone number or leave it blank.');
   if(typeof guest_note!=='string'||guest_note.length>500) throw new AppError('Keep the note within 500 characters.');
+  const plan={};
+  if(Object.hasOwn(input,'meal_plan')){
+    if(input.meal_plan!==null&&input.meal_plan!==''&&!['ep','cp','ap','package'].includes(input.meal_plan))throw new AppError('Choose EP, CP, all three meals or Package.');
+    plan.meal_plan=input.meal_plan||null;
+  }
+  if(Object.hasOwn(input,'meal_plan_note')){
+    if(typeof input.meal_plan_note!=='string'||input.meal_plan_note.length>200)throw new AppError('Keep package inclusions within 200 characters.');
+    plan.meal_plan_note=input.meal_plan_note.trim();
+  }
   if(input.id) {
     if(!uuid.test(input.id)||!Number.isInteger(input.revision)||input.revision<0) throw new AppError('Reopen the reservation and try again.');
   } else if(!uuid.test(input.request_key||'')||input.source==='website') throw new AppError('Reopen the booking form and try again.');
@@ -61,11 +71,21 @@ export function validateOwnerBooking(input) {
     if((sale!==null&&(!Number.isSafeInteger(sale)||sale<0||sale>MAX_PAISE))||!Number.isSafeInteger(advance)||advance<0||advance>MAX_PAISE||(advance>0&&(sale===null||advance>sale))) throw new AppError('Enter a valid sale amount and an advance no greater than the sale.');
     Object.assign(financial,{sale_amount_paise:sale,advance_paise:advance});
   }
-  return {...financial,id:input.id||null,revision:input.revision,request_key:input.request_key,room_ids:[...room_ids].sort(),
+  return {...financial,...plan,...(Object.hasOwn(input,'kpi')?{kpi:validateKpiCapture(input.kpi,AppError)}:{}),id:input.id||null,revision:input.revision,request_key:input.request_key,room_ids:[...room_ids].sort(),
     check_in:input.check_in,check_out:input.check_out,guests,guest_name,
     source:input.source,email:email.trim().toLowerCase(),phone:phone.trim(),guest_note:guest_note.trim()};
 }
 const DB_ERRORS={
+  KPI_INVALID:'Check the KPI fields, dates and amounts.',
+  KPI_RANGE:'Choose a valid reporting or availability date range.',
+  KPI_BOOKED_DATE:'Original booking date must be on or before check-in and cannot be in the future.',
+  KPI_STAY_STATUS:'Check the stay dates. For a no-show, cancel the reservation first to release its rooms, then mark No-show.',
+  KPI_REVENUE_SPLIT:'Enter all five revenue and tax amounts. Their total must equal the sale less recorded refunds. Complimentary rooms must have zero room revenue.',
+  KPI_COSTS:'Enter both commission and gateway fees, using zero if none.',
+  KPI_ROOM_OUT_OF_ORDER:'A selected room is marked out of order. Reopen it in Availability or choose another room.',
+  KPI_STALE:'This entry changed. Refresh before correcting it.',
+  KPI_ENTRY_REUSED:'This entry was already saved. Refresh the dashboard before entering another item.',
+  OWNER_INVALID_PLAN:'Choose a valid meal plan and keep package inclusions within 200 characters.',
   WALL_STALE:'This reservation changed. Refresh and review the latest details before marking the booking wall updated.',
   PAYMENT_STALE:'Payment details changed. Reopen this reservation before saving.',
   PAYMENT_BOOKING_LOCKED:'Payments can only be recorded for a confirmed reservation.',
@@ -126,7 +146,7 @@ export function createProductionServices(env) {
     return data;
   };
   const ownerRpc=async(input)=>{
-    const r=await supabase('/rest/v1/rpc/ch_owner_booking',{method:'POST',headers:{'Content-Type':'application/json',
+    const r=await supabase('/rest/v1/rpc/ch_kpi_owner_booking',{method:'POST',headers:{'Content-Type':'application/json',
       apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:`Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`},
       body:JSON.stringify({p_input:input})});
     const data=await r.json();if(!r.ok)throw dbError(data.message||'');return data;
@@ -143,7 +163,7 @@ export function createProductionServices(env) {
       body:JSON.stringify({p_action:action,p_input:input})});
     const data=await r.json();if(!r.ok)throw dbError(data.message||'');return data;
   };
-  const financeRpc=paymentService('ch_payments'),paymentReminderRpc=paymentService('ch_payment_push'),wallRpc=paymentService('ch_wall');
+  const financeRpc=paymentService('ch_kpi_payments'),kpiRpc=paymentService('ch_kpi'),paymentReminderRpc=paymentService('ch_payment_push'),wallRpc=paymentService('ch_wall');
   const gateway=async(path,body)=>{
     if(!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET) throw new AppError('Online payment is not available yet.',503,'NOT_CONFIGURED');
     const r=await fetch(`https://api.razorpay.com/v1/${path}`,{method:body?'POST':'GET',
@@ -153,7 +173,7 @@ export function createProductionServices(env) {
     if(!r.ok) throw new AppError('The payment service is temporarily unavailable. Please try again.',502,'PAYMENT_SERVICE');
     return data;
   };
-  return {rpc,auth,gateway,pushRpc,ownerRpc,ownerDashboard,financeRpc,paymentReminderRpc,wallRpc};
+  return {rpc,auth,gateway,pushRpc,ownerRpc,ownerDashboard,financeRpc,paymentReminderRpc,wallRpc,kpiRpc};
 }
 
 export function createApp(env,services) {
@@ -312,6 +332,27 @@ export function createApp(env,services) {
           }
           throw new AppError('Not found.',404);
         }
+        if(path.startsWith('/api/admin/kpi/')) {
+          const action=path.slice('/api/admin/kpi/'.length);
+          if(request.method==='GET'&&action==='report'){
+            const range=reportRange(Object.fromEntries(url.searchParams),AppError);
+            return respond(buildKpiReport(await services.kpiRpc('data',{start:range.previous_start,end:range.end}),range));
+          }
+          if(request.method==='POST'&&['booking','ledger','void','review'].includes(action)){
+            await rateLimit('owner-kpi',60,300);
+            const input={...body,actor:user.email};
+            if(action==='booking'){
+              input.kpi=validateKpiCapture(body.kpi,AppError);
+              if(!/^[0-9a-f-]{36}$/i.test(body.id||'')||!Number.isInteger(body.revision)||body.revision<0||!(body.guests===null||Number.isInteger(body.guests)&&body.guests>0&&body.guests<=36))throw new AppError('Reopen the reservation and check guest count.');
+            }
+            if(action==='ledger'){
+              if(!/^[0-9a-f-]{36}$/i.test(body.id||'')||!Number.isSafeInteger(body.amount_paise)||body.amount_paise<1||body.amount_paise>MAX_PAISE)throw new AppError('Enter a valid amount.');
+              reportRange({start:body.start_date,end:body.end_date},AppError);
+            }
+            return respond(await services.kpiRpc(action,input));
+          }
+          throw new AppError('Not found.',404);
+        }
         if(path.startsWith('/api/admin/payments/')) {
           const action=path.slice('/api/admin/payments/'.length);
           if(request.method==='GET'&&['list','website_report','booking'].includes(action)){
@@ -324,7 +365,7 @@ export function createApp(env,services) {
           }
           if(request.method==='POST'&&['save_sale','receipt','void','settings'].includes(action)){
             await rateLimit('owner-payments',60,300);
-            return respond(await services.financeRpc(action,{...validatePaymentInput(action,body,AppError),actor:user.email}));
+            return respond(await services.financeRpc(action,{...validatePaymentInput(action,body,AppError),...(action==='save_sale'&&Object.hasOwn(body,'kpi')?{kpi:validateKpiCapture(body.kpi,AppError)}:{}),actor:user.email}));
           }
           throw new AppError('Not found.',404);
         }
@@ -335,6 +376,7 @@ export function createApp(env,services) {
         }
         if(path==='/api/admin/sync'&&request.method==='POST'&&services.push)
           return respond(await services.push.markSynced(body,user,()=>rpc('admin_sync',body)));
+        if(path==='/api/admin/inventory'&&request.method==='POST'&&services.kpiRpc)return respond(await services.kpiRpc('inventory',{...body,actor:user.email}));
         const actions={'/api/admin/inventory':'admin_inventory','/api/admin/rates':'admin_rates','/api/admin/settings':'admin_settings',
           '/api/admin/cancel':'admin_cancel','/api/admin/sync':'admin_sync'};
         if(request.method==='POST'&&actions[path]) return respond(await rpc(actions[path],body));

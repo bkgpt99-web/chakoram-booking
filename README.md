@@ -212,3 +212,75 @@ tag and deep link. Recording a payment does not reopen a wall task.
 All new tables have RLS enabled and are callable only through authenticated owner API
 routes using the server role. Guest browser access to these tables/RPCs is denied.
 Local preview uses sample records and never sends real push notifications or charges.
+
+
+## Meal plans, nights and sale calculator (26 November 2026)
+
+Apply `supabase/migrations/20261126072259_owner_meal_plans.sql` after the payment
+and wall migrations, then deploy the matching owner frontend and server files.
+This migration was applied to the Chakoram booking project on 26 November 2026.
+No new environment variables or notification subscriptions are needed.
+
+The owner Add / Edit booking form offers EP (room only), CP (breakfast),
+AP (breakfast, lunch and dinner) and Package. Package inclusions have an optional
+200-character note. Existing bookings remain "Not set" until the owner selects a
+plan. A plan applies to the whole reservation, including mixed Deluxe/Premium
+room entries. Plans appear in reservation details, collections and exports.
+
+The existing day-before-check-in payment reminder includes the guest's current
+meal plan and package inclusions. It still requires a confirmed stay with a
+known positive balance, and runs at 9am IST (normally within five minutes).
+Checkout reminders retain the collection wording. The plan is read again before
+sending, so a queued reminder uses the latest saved selection.
+
+New bookings start with one night. Changing checkout calculates nights; entering
+nights calculates checkout. Moving check-in preserves the displayed night count.
+Opening an existing reservation preserves its saved dates. The existing 1–30
+night limit still applies.
+
+Calculate sale amount is available in Add booking and in Payment details > Save
+sale amount. Daily room rate × nights × rooms pre-fills the stay length and room
+count. The expression box also supports +, -, multiplication, division, brackets
+and percentages (10% = 0.10), for example `(3200 * 5 + 3800) * 3` or
+`3200 * 3 * (1 - 10%)`. Arithmetic is evaluated with exact fractions, without
+executing JavaScript, then rounded once to paise. Use this amount fills the sale
+field; Save booking / Save sale amount commits it. Calculator inputs alone do
+not change the saved sale or recorded receipts.
+
+## Owner KPI dashboard — 27 November 2026
+
+Owner login now opens **Dashboard**. Calendar retains its complete month layout. Use a date range (up to 366 days), compare the preceding equally long period, or export the KPI CSV. Reports query all matching reservations, independently of the latest-500 Reservations list.
+
+- Paid occupancy, ARR/ADR, RevPAR and TRevPAR; paid, complimentary and available room nights.
+- Room, meal, transfer and other income excluding taxes; whole-stay receipts and balances.
+- Direct/OTA room-night shares, source and physical-room breakdowns, average stay, original booking lead time, guest nights, cancellations and explicit no-shows.
+- Distribution costs, entered operating expenses, provisional operating result, margin and cost per occupied room night.
+- Missing-data list with a direct booking KPI editor, daily detail table, and monthly completeness review.
+
+### Capture workflow
+
+1. **Add/Edit booking:** enter guests and meal plan; expand **KPI details** for the original reservation date, paid/complimentary status, actual arrival/departure, full-stay income/tax split and actual commission/gateway fees. Quick guest-name-only entry remains supported; incomplete fields are flagged rather than filled with guesses.
+2. **Payment details:** Save sale amount can save the updated allocation in the same transaction. Income + taxes must equal the agreed sale minus recorded Razorpay refunds before the allocation can be confirmed. Revenue is gross of commission; record net OTA remittances separately as receipts.
+3. **Existing or guest website reservations:** open **KPI details / stay status** from the reservation, or **Complete details** on Dashboard. Genuine website creation time supplies booking date when no owner correction exists. Guest checkout already captures dates, guest count, source and sale; it is not burdened with owner accounting fields. Older manual dates, meal plans, income splits and costs stay unknown until entered.
+4. **Actual stays:** mark checked in or checked out after the event. A no-show must first be cancelled through the existing reservation control, releasing inventory, then marked No-show. Cancellation does not initiate a refund. Retained cancellation charges belong in additional other income.
+5. **Availability:** use **Closed for website sales** to stop online sales without reducing capacity. Record OTA stays as bookings. **Out of order / maintenance** removes explicit room nights from KPI capacity and blocks new owner bookings. Reopening clears the outage. Past maintenance may be recorded up to 730 days back, without overwriting booked nights.
+6. **Operating income & expenses:** record salaries, food supplies, utilities, laundry, housekeeping, repairs, marketing, internet and other operating costs by service dates; enter extra non-booking income separately. Do not duplicate booking income, commission or gateway fees. Correct a mistake by voiding it with a reason, then entering the replacement; history is retained.
+7. **Month review:** confirm all bookings/closures and all income/costs are entered. Relevant booking, allocation, maintenance or ledger changes invalidate the affected review. Current/future periods and incomplete financial/stay data remain provisional.
+
+### Calculation scope
+
+These are internal management indicators. Paid occupancy = paid room nights / available room nights; ADR = room income excluding tax / paid room nights; RevPAR uses available room nights. Complimentary rooms count in physical occupancy, not paid rooms sold. See the [CoStar/STR glossary](https://www.costar.com/products/str-benchmark/resources/glossary) and [reporting guidelines](https://www.costar.com/en-gb/gbr/products/str-benchmark/resources/guidelines/historical-benchmarking-data-reporting-guidelines) for industry definitions. This implementation is not a certified benchmarking submission.
+
+Dates use Asia/Kolkata; checkout is exclusive. **Booked** includes confirmed future reservations. **Actual** ends yesterday and includes only owner-verified arrivals/departures. Missing historical stays cannot be inferred from website closures. Default capacity assumes all six rooms existed throughout the selected range; explicitly record out-of-order periods if applicable.
+
+Each full-stay income component, tax and distribution cost is spread evenly across nights with cumulative integer-paise allocation. Service-period ledger amounts are similarly prorated. This is an estimate when nightly rates or package allocations vary. Mixed-room bookings contribute correctly to occupancy; no room-type ADR is invented without room-specific income allocation. Collections are current whole-stay totals for overlapping selected stays, not period cashflow. Cancellation/no-show rates use check-in cohorts and exclude abandoned payment holds. Amended history reflects the reservation's current state.
+
+Revenue-derived KPIs are unavailable if selected stays lack confirmed allocations; known partial totals are labeled. Unknown guest counts and original booking dates are reported separately. Operating result subtracts recorded operating and distribution costs; it excludes financing, depreciation and income tax, and is provisional until the period is reviewed. This is not a full accounting ledger or tax return. Use actual tax and expense amounts consistently with your accounts; no tax rates are guessed.
+
+### Database and rollout
+
+Apply `supabase/migrations/20261127013640_owner_kpi_dashboard.sql` after all earlier migrations, before deploying the updated functions and owner assets. It adds booking KPI metadata, explicit out-of-order flags, an operating ledger and monthly review records. It preserves all existing booking/payment fields and existing availability. All new tables use RLS and all new RPCs are limited to `service_role`; the API still requires the verified owner session and same-origin writes. No new Netlify environment variables are needed. The Chakoram production migration was applied during preparation of this update; do not rerun setup.sql or replace existing data.
+
+KPI wrappers keep legacy owner/payment RPC behaviour and omit booking tokens from responses. Booking creation, allocation and advance entry are atomic. Mutations retain revision checks and idempotent request keys. Legacy price edits and gateway refunds invalidate old revenue confirmations instead of silently reusing stale splits. Existing Yanolja, wall and payment reminders remain independent.
+
+Validation: `npm test` covers occupancy, maintenance, complimentary stays, cross-month paise conservation, unavailable revenue, actual-vs-booked periods, cohort cancellation rates, ledger corrections, atomic allocation changes, legacy compatibility, full-history reports, authentication/origin checks and service-only access. Browser sample workflows covered mixed-room capture, allocation, expense entry, sale amendment, guest count correction and the full-month calendar.
